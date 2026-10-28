@@ -72,6 +72,32 @@ export interface JumpConfig {
   platformInherit: number;
 }
 
+export interface SlideConfig {
+  /** Mindesttempo, damit die Slide-Taste einen Slide statt Ducken auslöst. */
+  minStartSpeed: number;
+  /** Tempo-Boost beim Start des Slides. */
+  boost: number;
+  /** Bis zu diesem Tempo wirkt der Boost (schnellere Slides bekommen keinen Boost). */
+  boostMaxSpeed: number;
+  /** Mindestabstand zwischen zwei Boosts – verhindert endloses Slide-Spammen. */
+  boostCooldown: number;
+  /** Reibung auf ebenem Boden. */
+  friction: number;
+  /** Faktor auf die Hangabtriebskraft (g·sinθ·cosθ): bergab schneller, bergauf langsamer. */
+  slopeAcceleration: number;
+  /** Wie schnell sich die Slide-Richtung per Eingabe lenken lässt (rad/s). */
+  steerRate: number;
+  /** Unter diesem Tempo endet der Slide. */
+  minSpeed: number;
+  maxSpeed: number;
+  /** Mindestdauer, bevor Loslassen der Taste den Slide beendet. */
+  minDuration: number;
+  /** Faktor auf die Sprunghöhe beim Slide-Jump. */
+  jumpHeightMultiplier: number;
+  /** Faktor auf das horizontale Tempo beim Slide-Jump (1 = Schwung bleibt voll erhalten). */
+  jumpSpeedMultiplier: number;
+}
+
 export interface MovementConfig {
   /** Feste Physik-Taktrate. */
   physicsHz: number;
@@ -81,6 +107,7 @@ export interface MovementConfig {
   ground: GroundConfig;
   air: AirConfig;
   jump: JumpConfig;
+  slide: SlideConfig;
 }
 
 export const MOVEMENT: MovementConfig = {
@@ -125,6 +152,21 @@ export const MOVEMENT: MovementConfig = {
     coyoteTime: 0.1,
     bufferTime: 0.1,
     platformInherit: 1,
+  },
+
+  slide: {
+    minStartSpeed: 6.5,
+    boost: 3.5,
+    boostMaxSpeed: 13,
+    boostCooldown: 1.0,
+    friction: 4,
+    slopeAcceleration: 1.1,
+    steerRate: 1.6,
+    minSpeed: 3,
+    maxSpeed: 32,
+    minDuration: 0.3,
+    jumpHeightMultiplier: 1,
+    jumpSpeedMultiplier: 1.03,
   },
 };
 

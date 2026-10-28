@@ -9,4 +9,6 @@ export type GameEvents = {
   jump: { kind: JumpKind; speed: number };
   land: { impactSpeed: number; horizontalSpeed: number; hard: boolean; roll: boolean };
   footstep: { speed: number; onWall: boolean };
+  slideStart: { speed: number; boosted: boolean };
+  slideEnd: { speed: number };
 };

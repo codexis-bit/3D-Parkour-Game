@@ -58,7 +58,7 @@ export class Game {
     this.overlay = document.createElement('div');
     this.overlay.className = 'click-to-play';
     this.overlay.innerHTML = `<div><h1>${GAME.name}</h1><p>Klicken zum Spielen</p>
-      <p class="hint">WASD bewegen · Maus umsehen · Leertaste springen · R zurücksetzen</p></div>`;
+      <p class="hint">WASD bewegen · Maus umsehen · Leertaste springen · Shift/Strg sliden · R zurücksetzen</p></div>`;
     this.overlay.addEventListener('click', () => void this.pointerLock.request());
     this.devHud = document.createElement('div');
     this.devHud.className = 'dev-hud';

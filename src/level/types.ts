@@ -37,7 +37,29 @@ export interface RampElement {
   thickness?: number;
 }
 
-export type LevelElement = PlatformElement | RampElement;
+/**
+ * Niedriger Durchgang, unter dem man nur sliden oder geduckt durchkommt.
+ * Erzeugt Deckenblock und (optional) Seitenwände – den Boden liefert eine normale Plattform.
+ */
+export interface SlideTunnelElement {
+  type: 'slideTunnel';
+  /** Mitte des Tunnelbodens (auf Höhe der Bodenoberkante). */
+  pos: Vec3;
+  /** Länge in Laufrichtung (lokale Z-Achse). */
+  length: number;
+  /** Lichte Breite. */
+  width: number;
+  /** Lichte Höhe – muss zwischen Duckhöhe (1,0 m) und Stehhöhe (1,8 m) liegen. */
+  clearance: number;
+  /** Dicke des Deckenblocks (Standard 1,5 m). */
+  ceilingThickness?: number;
+  /** Ausrichtung in Grad (0 = Tunnel verläuft entlang Z). */
+  yaw?: number;
+  /** Seitenwände erzeugen (Standard true). */
+  walls?: boolean;
+}
+
+export type LevelElement = PlatformElement | RampElement | SlideTunnelElement;
 
 export interface LevelSpawn {
   /** Fußposition. */

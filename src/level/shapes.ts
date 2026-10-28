@@ -64,6 +64,45 @@ export function resolveRamp(
   return { center, size: new THREE.Vector3(width, thickness, length), quaternion };
 }
 
+/** Wandstärke der Tunnel-Seitenwände. */
+const TUNNEL_WALL = 0.4;
+
+function resolveSlideTunnel(
+  element: Extract<LevelElement, { type: 'slideTunnel' }>,
+  index: number,
+  out: ResolvedBox[],
+): void {
+  const quaternion = quaternionFromDegrees([0, element.yaw ?? 0, 0]);
+  const base = toVector3(element.pos);
+  const thickness = element.ceilingThickness ?? 1.5;
+  const withWalls = element.walls ?? true;
+  const outerWidth = element.width + (withWalls ? TUNNEL_WALL * 2 : 0);
+  const local = (x: number, y: number): THREE.Vector3 =>
+    new THREE.Vector3(x, y, 0).applyQuaternion(quaternion).add(base);
+  const common = {
+    elementIndex: index,
+    quaternion,
+    material: 'slide' as const,
+    surface: 'solid' as const,
+    wallRunnable: false,
+    castShadow: true,
+  };
+  out.push({
+    ...common,
+    center: local(0, element.clearance + thickness / 2),
+    size: new THREE.Vector3(outerWidth, thickness, element.length),
+  });
+  if (!withWalls) return;
+  for (const side of [-1, 1]) {
+    out.push({
+      ...common,
+      quaternion: quaternion.clone(),
+      center: local(side * (element.width / 2 + TUNNEL_WALL / 2), element.clearance / 2),
+      size: new THREE.Vector3(TUNNEL_WALL, element.clearance, element.length),
+    });
+  }
+}
+
 function resolveElement(element: LevelElement, index: number, out: ResolvedBox[]): void {
   switch (element.type) {
     case 'platform':
@@ -90,6 +129,9 @@ function resolveElement(element: LevelElement, index: number, out: ResolvedBox[]
       });
       return;
     }
+    case 'slideTunnel':
+      resolveSlideTunnel(element, index, out);
+      return;
   }
 }
 

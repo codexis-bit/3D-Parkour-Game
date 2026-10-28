@@ -47,7 +47,6 @@ export async function createSim(
   const input = createPlayerInput();
   const view: PlayerView = { yaw: level.spawnYaw, pitch: 0 };
   const log: Sim['log'] = [];
-  const types: (keyof GameEvents)[] = ['stateChange', 'jump', 'land', 'footstep'];
 
   const sim: Sim = {
     level,
@@ -81,9 +80,12 @@ export async function createSim(
       level.dispose();
     },
   };
-  for (const type of types) {
-    events.on(type, (payload) => log.push({ type, payload, tick: sim.tick }));
-  }
+  // Alle Events protokollieren, ohne die Typen einzeln aufzählen zu müssen.
+  const emit = events.emit.bind(events);
+  events.emit = ((type: keyof GameEvents, payload: GameEvents[keyof GameEvents]) => {
+    log.push({ type, payload, tick: sim.tick });
+    emit(type, payload);
+  }) as typeof events.emit;
   return sim;
 }
 

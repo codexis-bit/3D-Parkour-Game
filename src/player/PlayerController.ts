@@ -12,6 +12,7 @@ import {
   horizontalSpeed,
   wishDirection,
 } from '../mechanics/Locomotion';
+import { Slide } from '../mechanics/Slide';
 import { MOVE_TRANSITIONS, MoveState } from './MoveState';
 import {
   createGroundProbe,
@@ -21,6 +22,8 @@ import {
   type MoveResult,
 } from './PlayerBody';
 import { StateMachine } from './StateMachine';
+
+const UP = new THREE.Vector3(0, 1, 0);
 
 /** Blickrichtung der Kamera (rad), wird pro Tick an den Controller übergeben. */
 export interface PlayerView {
@@ -54,6 +57,7 @@ export class PlayerController {
   airTime = 0;
   /** Aufprallgeschwindigkeit der letzten Landung (m/s, positiv). */
   lastImpactSpeed = 0;
+  readonly slide: Slide;
 
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
@@ -72,8 +76,9 @@ export class PlayerController {
   ) {
     this.body = new PlayerBody(physics, cfg.player, spawnFeet);
     this.previousFeet.copy(spawnFeet);
+    this.slide = new Slide(cfg.slide, cfg.gravity);
     this.fsm = new StateMachine<MoveState>(MoveState.Airborne, MOVE_TRANSITIONS, (from, to) =>
-      this.events.emit('stateChange', { from, to }),
+      this.onStateChange(from, to),
     );
   }
 
@@ -111,12 +116,16 @@ export class PlayerController {
 
     this.carryWithPlatform();
     if (input.jumpPressed) this.jumpBufferTimer = this.cfg.jump.bufferTime;
+    this.slide.tick(dt);
     wishDirection(input.moveX, input.moveY, view.yaw, this.wish);
     this.body.probeGround(0.6, this.ground);
 
     switch (this.fsm.state) {
       case MoveState.Grounded:
         this.updateGrounded(dt);
+        break;
+      case MoveState.Sliding:
+        this.updateSliding(dt);
         break;
       default:
         this.updateAirborne(dt);
@@ -139,6 +148,7 @@ export class PlayerController {
     this.jumpBufferTimer = 0;
     this.jumpCutArmed = false;
     this.airTime = 0;
+    this.slide.reset();
     this.fsm.force(MoveState.Airborne);
   }
 
@@ -150,13 +160,42 @@ export class PlayerController {
 
   private updateGrounded(dt: number): void {
     if (this.jumpBufferTimer > 0 && this.tryJump('ground')) return;
+    const input = this.input;
+    // Slide-Taste: mit genug Tempo sliden, sonst ducken.
+    if (input?.slidePressed && this.slide.canStart(this.horizontalSpeed)) {
+      this.startSlide();
+      this.updateSliding(dt);
+      return;
+    }
+    if (input?.slideHeld) this.body.setCrouched(true);
+    else if (this.body.isCrouched) this.body.setCrouched(false); // nur mit Kopffreiheit
+
     const maxSpeed = this.body.isCrouched ? this.cfg.ground.crouchSpeed : this.cfg.ground.runSpeed;
     applyGroundMovement(this.velocity, this.wish, maxSpeed, this.cfg.ground, dt);
     this.velocity.y = -this.cfg.player.groundStickSpeed;
   }
 
+  private updateSliding(dt: number): void {
+    if (this.jumpBufferTimer > 0 && this.tryJump('slide')) return;
+    const normal = this.ground.hit && this.ground.distance < 0.3 ? this.ground.normal : UP;
+    this.slide.update(this.velocity, normal, this.wish, dt);
+    this.velocity.y = -this.cfg.player.groundStickSpeed;
+
+    const released = !this.input?.slideHeld && this.fsm.timeInState >= this.cfg.slide.minDuration;
+    if (this.horizontalSpeed < this.cfg.slide.minSpeed || released) {
+      this.fsm.transition(MoveState.Grounded);
+      // Unter einem niedrigen Hindernis bleibt der Spieler automatisch geduckt.
+      if (!this.input?.slideHeld) this.body.setCrouched(false);
+    }
+  }
+
   private updateAirborne(dt: number): void {
-    if (this.jumpBufferTimer > 0 && this.coyoteTimer > 0 && this.tryJump('coyote')) return;
+    if (this.jumpBufferTimer > 0 && this.coyoteTimer > 0) {
+      const kind: JumpKind = this.fsm.previous === MoveState.Sliding ? 'slide' : 'coyote';
+      if (this.tryJump(kind)) return;
+    }
+    // In der Luft nur geduckt bleiben, solange die Slide-Taste gehalten wird.
+    if (this.body.isCrouched && !this.input?.slideHeld) this.body.setCrouched(false);
 
     // Variable Sprunghöhe: Loslassen während des Steigens kappt die Aufwärtsgeschwindigkeit einmalig.
     if (this.jumpCutArmed) {
@@ -181,11 +220,25 @@ export class PlayerController {
 
   // ---------------------------------------------------------------- Aktionen
 
+  private startSlide(): void {
+    this.body.setCrouched(true);
+    const boosted = this.slide.start(this.velocity);
+    this.fsm.transition(MoveState.Sliding);
+    this.events.emit('slideStart', { speed: this.horizontalSpeed, boosted });
+  }
+
   private tryJump(kind: JumpKind): boolean {
     // Unter niedriger Decke kann man nicht aufstehen – und damit nicht springen.
     if (this.body.isCrouched && !this.body.setCrouched(false)) return false;
-    this.velocity.y = jumpVelocity(this.cfg, this.cfg.jump.height);
-    const platform = this.grounded || kind === 'coyote' ? this.ground.surface?.platform : undefined;
+    let height = this.cfg.jump.height;
+    if (kind === 'slide') {
+      // Slide-Jump: Schwung bleibt erhalten (optional leicht verstärkt).
+      height *= this.cfg.slide.jumpHeightMultiplier;
+      this.velocity.x *= this.cfg.slide.jumpSpeedMultiplier;
+      this.velocity.z *= this.cfg.slide.jumpSpeedMultiplier;
+    }
+    this.velocity.y = jumpVelocity(this.cfg, height);
+    const platform = this.grounded || kind !== 'ground' ? this.ground.surface?.platform : undefined;
     if (platform) {
       const k = this.cfg.jump.platformInherit;
       this.velocity.x += platform.velocity.x * k;
@@ -206,7 +259,9 @@ export class PlayerController {
     this.lastImpactSpeed = impact;
     this.velocity.y = -this.cfg.player.groundStickSpeed;
     this.jumpCutArmed = false;
-    this.fsm.transition(MoveState.Grounded);
+    // Landen mit gehaltener Slide-Taste geht direkt in einen Slide über (Momentum bleibt).
+    if (this.input?.slideHeld && this.slide.canStart(this.horizontalSpeed)) this.startSlide();
+    else this.fsm.transition(MoveState.Grounded);
     this.events.emit('land', {
       impactSpeed: impact,
       horizontalSpeed: this.horizontalSpeed,
@@ -243,7 +298,7 @@ export class PlayerController {
 
     if (state === MoveState.Airborne && this.grounded) {
       this.land(preVelocityY);
-    } else if (state === MoveState.Grounded && !this.grounded) {
+    } else if ((state === MoveState.Grounded || state === MoveState.Sliding) && !this.grounded) {
       // Kante verlassen, ohne zu springen → Coyote Time startet.
       this.coyoteTimer = this.cfg.jump.coyoteTime;
       this.fsm.transition(MoveState.Airborne);
@@ -251,6 +306,11 @@ export class PlayerController {
 
     this.airTime = this.grounded ? 0 : this.airTime + dt;
     if (this.fsm.state === MoveState.Grounded) this.advanceStride(this.horizontalSpeed * dt);
+  }
+
+  private onStateChange(from: MoveState, to: MoveState): void {
+    if (from === MoveState.Sliding) this.events.emit('slideEnd', { speed: this.horizontalSpeed });
+    this.events.emit('stateChange', { from, to });
   }
 
   private advanceStride(distance: number): void {
