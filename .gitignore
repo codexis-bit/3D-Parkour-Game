@@ -1,0 +1,32 @@
+# Abhängigkeiten
+node_modules/
+
+# Build- und Test-Ausgaben
+dist/
+dist-ssr/
+coverage/
+test-results/
+playwright-report/
+*.local
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Umgebungsvariablen
+.env
+.env.*
+!.env.example
+
+# Editor / Betriebssystem
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.sw?
