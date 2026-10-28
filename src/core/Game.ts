@@ -3,7 +3,7 @@ import { GAME } from '../config/game';
 import { MOVEMENT } from '../config/movement';
 import { DEFAULT_ENVIRONMENT } from '../config/render';
 import { Environment } from '../level/Environment';
-import { Level } from '../level/Level';
+import { Level, type TriggerEvent } from '../level/Level';
 import { MeshFactory } from '../level/LevelVisuals';
 import { MaterialLibrary } from '../level/materials';
 import type { LevelData } from '../level/types';
@@ -47,6 +47,7 @@ export class Game {
   private readonly renderFeet = new THREE.Vector3();
   private readonly hand = new THREE.Vector3();
   private readonly ropeCenter = new THREE.Vector3();
+  private readonly triggerEvents: TriggerEvent[] = [];
   private readonly rope = new RopeRenderer();
   private readonly hud: HUD;
   private materials: MaterialLibrary;
@@ -78,7 +79,7 @@ export class Game {
     this.overlay.className = 'click-to-play';
     this.overlay.innerHTML = `<div><h1>${GAME.name}</h1><p>Klicken zum Spielen</p>
       <p class="hint">WASD bewegen · Maus umsehen · Leertaste springen · Shift/Strg sliden ·
-      Rechtsklick/E Grappling Hook · R zurücksetzen</p></div>`;
+      Rechtsklick/E Grappling Hook · R Checkpoint · T Neustart</p></div>`;
     this.overlay.addEventListener('click', () => void this.pointerLock.request());
     this.devHud = document.createElement('div');
     this.devHud.className = 'dev-hud';
@@ -91,7 +92,9 @@ export class Game {
       this.overlay.hidden = locked;
     });
     this.input.onAction((action) => {
-      if (action === 'respawn' && this.input.enabled) this.respawn();
+      if (!this.input.enabled) return;
+      if (action === 'respawn') this.respawn();
+      else if (action === 'restart') this.restart();
     });
   }
 
@@ -111,7 +114,7 @@ export class Game {
     this.environment.apply(level.environment);
     this.player = new PlayerController(level.physics, this.events, MOVEMENT, level.spawnFeet);
     this.player.setGrapplePoints(level.grapplePoints);
-    this.respawn();
+    this.restart();
   }
 
   start(): void {
@@ -144,12 +147,23 @@ export class Game {
     };
   }
 
+  /** Zurück zum letzten Checkpoint (bzw. zum Start, wenn noch keiner erreicht wurde). */
   private respawn(): void {
-    if (!this.level || !this.player) return;
-    this.player.teleport(this.level.spawnFeet);
-    this.cameraRig.setOrientation(this.level.spawnYaw, 0);
-    this.cameraRig.snapEyeHeight(this.player.targetEyeHeight);
+    const level = this.level;
+    const player = this.player;
+    if (!level || !player) return;
+    const { feet, yaw } = level.respawnPoint;
+    player.teleport(feet);
+    this.cameraRig.setOrientation(yaw, 0);
+    this.cameraRig.snapEyeHeight(player.targetEyeHeight);
     this.fixed.reset();
+    this.events.emit('respawn', { checkpoint: level.checkpointIndex });
+  }
+
+  /** Sofort-Neustart des Levels: Fortschritt zurücksetzen und zum Start. */
+  private restart(): void {
+    this.level?.resetProgress();
+    this.respawn();
   }
 
   private unloadLevel(): void {
@@ -193,7 +207,23 @@ export class Game {
     level.fixedUpdate(dt);
     level.physics.step();
     player.fixedUpdate(dt, this.tickInput, this.cameraRig.getView());
-    if (player.feet.y < level.data.killY) this.respawn();
+    this.handleTriggers(level, player);
+  }
+
+  private handleTriggers(level: Level, player: PlayerController): void {
+    level.checkTriggers(player.feet, player.body.radius, player.body.height, this.triggerEvents);
+    for (const event of this.triggerEvents) {
+      if (event.type === 'checkpoint') {
+        const total = level.checkpoints.length;
+        this.events.emit('checkpoint', { index: event.index, total });
+        this.hud.toast(`Checkpoint ${event.index + 1}/${total}`, 'good');
+      } else {
+        this.events.emit('death', { reason: event.reason });
+        this.hud.flash();
+        this.respawn();
+        return;
+      }
+    }
   }
 
   /** Seil, Hervorhebung des Ziels und HUD-Indikator. */

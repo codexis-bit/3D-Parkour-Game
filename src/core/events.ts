@@ -18,6 +18,10 @@ export type GameEvents = {
   grappleAttach: { pointId: number; mode: 'pull' | 'swing' };
   grappleRelease: { speed: number; reason: GrappleReleaseReason };
   grappleCancel: Record<string, never>;
+  vault: { height: number };
+  checkpoint: { index: number; total: number };
+  death: { reason: 'fall' | 'killZone' };
+  respawn: { checkpoint: number };
 };
 
 export type GrappleReleaseReason = 'released' | 'arrived' | 'jump' | 'timeout' | 'blocked';

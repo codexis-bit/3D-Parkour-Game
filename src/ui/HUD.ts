@@ -23,18 +23,47 @@ export class HUD {
   private readonly crosshair: HTMLDivElement;
   private readonly marker: HTMLDivElement;
   private readonly markerLabel: HTMLSpanElement;
+  private readonly toastBox: HTMLDivElement;
+  private readonly flashBox: HTMLDivElement;
   private readonly projected = new THREE.Vector3();
+  private toastTimer = 0;
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
     this.root.className = 'hud';
     this.root.innerHTML = `
       <div class="crosshair"><span></span></div>
-      <div class="grapple-marker" hidden><span class="grapple-marker__label"></span></div>`;
+      <div class="grapple-marker" hidden><span class="grapple-marker__label"></span></div>
+      <div class="toast" hidden></div>
+      <div class="flash"></div>`;
     parent.append(this.root);
     this.crosshair = this.root.querySelector('.crosshair') as HTMLDivElement;
     this.marker = this.root.querySelector('.grapple-marker') as HTMLDivElement;
     this.markerLabel = this.root.querySelector('.grapple-marker__label') as HTMLSpanElement;
+    this.toastBox = this.root.querySelector('.toast') as HTMLDivElement;
+    this.flashBox = this.root.querySelector('.flash') as HTMLDivElement;
+  }
+
+  /** Kurze Meldung oben in der Bildmitte (z. B. „Checkpoint 2/4“). */
+  toast(text: string, kind: 'good' | 'info' = 'info', seconds = 1.6): void {
+    this.toastBox.textContent = text;
+    this.toastBox.dataset.kind = kind;
+    this.toastBox.hidden = false;
+    // Animation neu starten
+    this.toastBox.classList.remove('toast--show');
+    void this.toastBox.offsetWidth;
+    this.toastBox.classList.add('toast--show');
+    window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => {
+      this.toastBox.hidden = true;
+    }, seconds * 1000);
+  }
+
+  /** Roter Blitz beim Tod / Respawn. */
+  flash(): void {
+    this.flashBox.classList.remove('flash--on');
+    void this.flashBox.offsetWidth;
+    this.flashBox.classList.add('flash--on');
   }
 
   set visible(visible: boolean) {

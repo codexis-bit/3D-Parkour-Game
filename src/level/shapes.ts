@@ -145,7 +145,9 @@ function resolveElement(element: LevelElement, index: number, out: ResolvedBox[]
       resolveSlideTunnel(element, index, out);
       return;
     case 'grapple':
-      // Keine statische Geometrie (wird als eigenes, animiertes Objekt dargestellt).
+    case 'checkpoint':
+    case 'killZone':
+      // Keine Kollisionsgeometrie – diese Elemente sind Auslöser bzw. eigene, animierte Objekte.
       return;
   }
 }

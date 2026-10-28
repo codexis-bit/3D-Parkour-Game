@@ -77,8 +77,33 @@ export interface GrappleElement {
   range?: number;
 }
 
+/** Checkpoint: Respawn-Punkt, wird beim Durchlaufen des Auslösebereichs aktiviert. */
+export interface CheckpointElement {
+  type: 'checkpoint';
+  /** Fußposition beim Respawn = Mitte der Unterkante des Auslösebereichs. */
+  pos: Vec3;
+  /** Blickrichtung beim Respawn (Grad, wie beim Spawn). */
+  yaw: number;
+  /** Größe des Auslösebereichs (Standard [4, 3, 4]). */
+  size?: Vec3;
+}
+
+/** Tödliche Zone (rot) – Berührung setzt den Spieler zum letzten Checkpoint zurück. */
+export interface KillZoneElement {
+  type: 'killZone';
+  /** Mittelpunkt. */
+  pos: Vec3;
+  size: Vec3;
+}
+
 export type LevelElement =
-  PlatformElement | WallRunElement | RampElement | SlideTunnelElement | GrappleElement;
+  | PlatformElement
+  | WallRunElement
+  | RampElement
+  | SlideTunnelElement
+  | GrappleElement
+  | CheckpointElement
+  | KillZoneElement;
 
 export interface LevelSpawn {
   /** Fußposition. */

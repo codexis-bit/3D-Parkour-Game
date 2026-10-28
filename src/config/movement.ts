@@ -202,6 +202,35 @@ export interface GrappleConfig {
   jumpReleaseUpSpeed: number;
 }
 
+export interface VaultConfig {
+  /** Niedrigste Kante (über den Füßen), an der automatisch hochgezogen wird – darunter greift Autostep. */
+  minHeight: number;
+  /** Höchste Kante über den Füßen („Brusthöhe“). */
+  maxHeight: number;
+  /** Erkennungsweite vor dem Spieler (über den Kapselradius hinaus). */
+  reach: number;
+  /** Beim Steigen schneller als das wird nicht hochgezogen (der Sprung trägt dann ohnehin). */
+  maxUpSpeed: number;
+  /** Dauer = baseDuration + Kantenhöhe × durationPerMeter. */
+  baseDuration: number;
+  durationPerMeter: number;
+  /** Anteil des horizontalen Tempos, der nach dem Hochziehen bleibt. */
+  speedKeep: number;
+  /** Mindesttempo nach dem Hochziehen. */
+  minExitSpeed: number;
+  /** Sperrzeit nach einem Vault. */
+  cooldown: number;
+}
+
+export interface LandingConfig {
+  /** Ab diesem Aufpralltempo (m/s) gilt die Landung als hart → Kamera-Shake. */
+  hardImpactSpeed: number;
+  /** Ab diesem Aufpralltempo rollt der Spieler ab (Kamera-Animation). Kein Fallschaden. */
+  rollImpactSpeed: number;
+  /** Tempo-Faktor bei harter Landung ohne Abrollen (1 = kein Tempoverlust). */
+  hardSpeedKeep: number;
+}
+
 export interface MovementConfig {
   /** Feste Physik-Taktrate. */
   physicsHz: number;
@@ -215,6 +244,8 @@ export interface MovementConfig {
   wallRun: WallRunConfig;
   wallJump: WallJumpConfig;
   grapple: GrappleConfig;
+  vault: VaultConfig;
+  landing: LandingConfig;
 }
 
 export const MOVEMENT: MovementConfig = {
@@ -335,6 +366,24 @@ export const MOVEMENT: MovementConfig = {
     swingReleaseUpBoost: 3,
 
     jumpReleaseUpSpeed: 6.5,
+  },
+
+  vault: {
+    minHeight: 0.45,
+    maxHeight: 1.5,
+    reach: 0.55,
+    maxUpSpeed: 4,
+    baseDuration: 0.16,
+    durationPerMeter: 0.14,
+    speedKeep: 0.85,
+    minExitSpeed: 4.5,
+    cooldown: 0.25,
+  },
+
+  landing: {
+    hardImpactSpeed: 13,
+    rollImpactSpeed: 20,
+    hardSpeedKeep: 1,
   },
 };
 

@@ -56,6 +56,11 @@ export const sandboxLevel: LevelData = {
     { type: 'grapple', pos: [-6, 10, -28.5], mode: 'pull' },
     { type: 'grapple', pos: [0, 13, -16], mode: 'swing' },
 
+    // Checkpoints und eine Kill-Zone
+    { type: 'checkpoint', pos: [8, 0, 14], yaw: 0 },
+    { type: 'checkpoint', pos: [-18, 0, -36], yaw: 180 },
+    { type: 'killZone', pos: [-24, 0.4, 20], size: [8, 0.8, 8] },
+
     // Sprungstrecke auf 2 m Höhe: Lücken mit 3 / 4 / 5 / 6 m
     { type: 'ramp', from: [30, 0, 12], to: [30, 2, 0], width: 4 },
     { type: 'platform', pos: [30, 1, -2], size: [4, 2, 4] },

@@ -14,6 +14,7 @@ import {
 } from '../mechanics/Locomotion';
 import { Grapple, type GrapplePoint } from '../mechanics/Grapple';
 import { Slide } from '../mechanics/Slide';
+import { createLedgeCandidate, Vault } from '../mechanics/Vault';
 import { computeWallJumpVelocity } from '../mechanics/WallJump';
 import { createWallContact, WallRun, type WallRunResult } from '../mechanics/WallRun';
 import { MOVE_TRANSITIONS, MoveState } from './MoveState';
@@ -32,8 +33,7 @@ export type { PlayerView } from './PlayerContext';
 const UP = new THREE.Vector3(0, 1, 0);
 
 /**
- * Spieler-Controller als State Machine
- * (Grounded, Airborne, Sliding, WallRunning, Grappling – Vaulting folgt).
+ * Spieler-Controller als State Machine (Grounded, Airborne, Sliding, WallRunning, Grappling, Vaulting).
  *
  * Ablauf pro festem Physik-Tick:
  * 1. Eingabe-Flanken in Timer übernehmen (Jump Buffer), Cooldowns weiterzählen,
@@ -54,6 +54,7 @@ export class PlayerController implements PlayerContext {
   readonly slide: Slide;
   readonly wallRun: WallRun;
   readonly grapple: Grapple;
+  readonly vault: Vault;
   /** Eingabe des aktuellen Ticks. */
   input: PlayerInput = createPlayerInput();
   /** Blickrichtung des aktuellen Ticks (Wall Jump und Grapple brauchen sie). */
@@ -75,6 +76,7 @@ export class PlayerController implements PlayerContext {
   /** Zusätzliche Verschiebung in diesem Tick (z. B. Seilkorrektur), nicht Teil der Geschwindigkeit. */
   private readonly correction = new THREE.Vector3();
   private readonly wallContact = createWallContact();
+  private readonly ledge = createLedgeCandidate();
   private readonly eye = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
   private readonly center = new THREE.Vector3();
@@ -90,6 +92,7 @@ export class PlayerController implements PlayerContext {
     this.slide = new Slide(cfg.slide, cfg.gravity);
     this.wallRun = new WallRun(cfg.wallRun);
     this.grapple = new Grapple(cfg.grapple);
+    this.vault = new Vault(cfg.vault);
     this.fsm = new StateMachine<MoveState>(MoveState.Airborne, MOVE_TRANSITIONS, (from, to) =>
       this.onStateChange(from, to),
     );
@@ -152,6 +155,7 @@ export class PlayerController implements PlayerContext {
     this.slide.tick(dt);
     this.wallRun.tick(dt);
     this.grapple.tick(dt);
+    this.vault.tick(dt);
     wishDirection(input.moveX, input.moveY, view.yaw, this.wish);
     this.body.probeGround(0.6, this.ground);
     this.updateGrappleHook(dt);
@@ -168,6 +172,9 @@ export class PlayerController implements PlayerContext {
         break;
       case MoveState.Grappling:
         this.updateGrappling(dt);
+        break;
+      case MoveState.Vaulting:
+        this.updateVaulting(dt);
         break;
       default:
         this.updateAirborne(dt);
@@ -195,6 +202,7 @@ export class PlayerController implements PlayerContext {
     this.slide.reset();
     this.wallRun.resetMemory();
     this.grapple.reset();
+    this.vault.reset();
     this.fsm.force(MoveState.Airborne);
   }
 
@@ -214,6 +222,7 @@ export class PlayerController implements PlayerContext {
     }
     if (this.input.slideHeld) this.body.setCrouched(true);
     else if (this.body.isCrouched) this.body.setCrouched(false); // nur mit Kopffreiheit
+    if (this.tryVault()) return;
 
     const maxSpeed = this.body.isCrouched ? this.cfg.ground.crouchSpeed : this.cfg.ground.runSpeed;
     applyGroundMovement(this.velocity, this.wish, maxSpeed, this.cfg.ground, dt);
@@ -258,6 +267,7 @@ export class PlayerController implements PlayerContext {
     );
     applyAirMovement(this.velocity, this.wish, this.cfg.air, dt);
     this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
+    if (this.tryVault()) return;
 
     // Wall Run starten, wenn seitlich eine markierte Wand ist und die Bedingungen passen.
     if (
@@ -309,7 +319,29 @@ export class PlayerController implements PlayerContext {
     }
   }
 
+  private updateVaulting(dt: number): void {
+    if (!this.vault.update(this.body, dt)) return;
+    this.vault.finish(this);
+    this.grounded = true;
+    this.fsm.transition(MoveState.Grounded);
+  }
+
   // ---------------------------------------------------------------- Aktionen
+
+  /** Kante in Brusthöhe vor dem Spieler? Dann automatisch hochziehen. */
+  private tryVault(): boolean {
+    if (!this.vault.findLedge(this, this.ledge)) return false;
+    if (this.fsm.state === MoveState.WallRunning) {
+      this.wallRun.leave(this.velocity, 0);
+      this.events.emit('wallRunEnd', { reason: 'cancel' });
+    }
+    if (this.ledge.crouched) this.body.setCrouched(true);
+    this.vault.start(this, this.ledge);
+    this.jumpCutArmed = false;
+    this.fsm.transition(MoveState.Vaulting);
+    this.events.emit('vault', { height: this.ledge.height });
+    return true;
+  }
 
   /** Zielerfassung, Abschuss und Hakenflug – läuft unabhängig vom Movement-State. */
   private updateGrappleHook(dt: number): void {
@@ -458,6 +490,13 @@ export class PlayerController implements PlayerContext {
 
   private land(impactVelocityY: number): void {
     const impact = Math.max(0, -impactVelocityY);
+    const landing = this.cfg.landing;
+    const roll = impact >= landing.rollImpactSpeed;
+    const hard = impact >= landing.hardImpactSpeed;
+    if (hard && !roll) {
+      this.velocity.x *= landing.hardSpeedKeep;
+      this.velocity.z *= landing.hardSpeedKeep;
+    }
     this.lastImpactSpeed = impact;
     this.velocity.y = -this.cfg.player.groundStickSpeed;
     this.jumpCutArmed = false;
@@ -471,8 +510,8 @@ export class PlayerController implements PlayerContext {
     this.events.emit('land', {
       impactSpeed: impact,
       horizontalSpeed: this.horizontalSpeed,
-      hard: impact > 14,
-      roll: false,
+      hard,
+      roll,
     });
   }
 
@@ -490,6 +529,11 @@ export class PlayerController implements PlayerContext {
 
   private integrate(dt: number): void {
     const state = this.fsm.state;
+    if (state === MoveState.Vaulting) {
+      // Die Vault-Animation bewegt den Körper selbst (kollisionsfrei, Ziel vorher geprüft).
+      this.grounded = false;
+      return;
+    }
     const onGround = state === MoveState.Grounded || state === MoveState.Sliding;
     this.body.setSnapToGround(onGround);
 
