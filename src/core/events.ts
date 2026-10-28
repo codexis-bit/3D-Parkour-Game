@@ -23,6 +23,8 @@ export type GameEvents = {
   jumpPad: { power: number };
   death: { reason: 'fall' | 'killZone' };
   respawn: { checkpoint: number };
+  timerStart: { levelId: string };
+  finish: { levelId: string; time: number; newRecord: boolean };
 };
 
 export type GrappleReleaseReason = 'released' | 'arrived' | 'jump' | 'timeout' | 'blocked';

@@ -1,7 +1,7 @@
 import './style.css';
 import { GAME } from './config/game';
 import { Game, type TestControls } from './core/Game';
-import { findLevel, LEVELS } from './level/levels';
+import { findLevel } from './level/levels';
 
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>('#game');
@@ -10,19 +10,22 @@ async function boot(): Promise<void> {
 
   const loading = document.createElement('div');
   loading.className = 'boot-overlay';
-  loading.innerHTML = `<div><h1>${GAME.name}</h1>Lade Physik …</div>`;
+  loading.innerHTML = `<div><h1>${GAME.name}</h1><p>Lade Physik …</p></div>`;
   ui.append(loading);
 
   const game = new Game(canvas, ui);
   await game.init();
-  const requested = new URLSearchParams(location.search).get('level');
-  game.loadLevel((requested ? findLevel(requested) : undefined) ?? LEVELS[0]!);
+
+  const params = new URLSearchParams(location.search);
+  const requested = params.get('level');
+  const level = requested ? findLevel(requested) : undefined;
+  // `?level=<id>` startet ein Level direkt (auch Entwickler-Levels wie die Sandbox).
+  if (level) game.playLevelData(level);
+  else game.showMainMenu();
   loading.remove();
   game.start();
 
-  if (new URLSearchParams(location.search).has('test')) {
-    window.momentumTest = game.enableTestControls();
-  }
+  if (params.has('test')) window.momentumTest = game.enableTestControls();
 }
 
 declare global {

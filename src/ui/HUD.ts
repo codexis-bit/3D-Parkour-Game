@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { clamp } from '../core/math';
 import type { GrappleMode } from '../level/types';
+import { formatSpeed, formatTime } from './format';
 
 /** Zustand des Grapple-Indikators im Fadenkreuz. */
 export interface GrappleIndicator {
@@ -14,9 +16,11 @@ export interface GrappleIndicator {
 
 const MODE_LABEL: Record<GrappleMode, string> = { pull: 'ZIEHEN', swing: 'SCHWINGEN' };
 
+export type TimerState = 'waiting' | 'running' | 'finished';
+
 /**
- * Head-up-Display: Fadenkreuz mit Grapple-Indikator und Markierung des anvisierten Grapple-Punkts.
- * (Timer, Tempo und Meldungen kommen mit dem UI-Meilenstein dazu.)
+ * Head-up-Display: Timer (ms), Tempo, Level/Checkpoints, Fadenkreuz mit Grapple-Indikator,
+ * Markierung des anvisierten Grapple-Punkts, Meldungen und Tutorial-Hinweise.
  */
 export class HUD {
   readonly root: HTMLDivElement;
@@ -26,6 +30,15 @@ export class HUD {
   private readonly toastBox: HTMLDivElement;
   private readonly flashBox: HTMLDivElement;
   private readonly hintBox: HTMLDivElement;
+  private readonly levelName: HTMLSpanElement;
+  private readonly levelCheckpoints: HTMLSpanElement;
+  private readonly timerTime: HTMLDivElement;
+  private readonly timerSub: HTMLDivElement;
+  private readonly speedValue: HTMLSpanElement;
+  private readonly speedUnit: HTMLSpanElement;
+  private readonly speedBar: HTMLSpanElement;
+  private lastTimerText = '';
+  private lastSpeedText = '';
   private readonly projected = new THREE.Vector3();
   private toastTimer = 0;
 
@@ -33,6 +46,12 @@ export class HUD {
     this.root = document.createElement('div');
     this.root.className = 'hud';
     this.root.innerHTML = `
+      <div class="hud-level"><span class="hud-level__name"></span><span class="hud-level__cp"></span></div>
+      <div class="hud-timer"><div class="hud-timer__time">00:00.000</div><div class="hud-timer__sub"></div></div>
+      <div class="hud-speed">
+        <div><span class="hud-speed__value">0</span><span class="hud-speed__unit">km/h</span></div>
+        <div class="hud-speed__bar"><span></span></div>
+      </div>
       <div class="crosshair"><span></span></div>
       <div class="grapple-marker" hidden><span class="grapple-marker__label"></span></div>
       <div class="toast" hidden></div>
@@ -45,6 +64,49 @@ export class HUD {
     this.toastBox = this.root.querySelector('.toast') as HTMLDivElement;
     this.flashBox = this.root.querySelector('.flash') as HTMLDivElement;
     this.hintBox = this.root.querySelector('.hint-box') as HTMLDivElement;
+    this.levelName = this.root.querySelector('.hud-level__name') as HTMLSpanElement;
+    this.levelCheckpoints = this.root.querySelector('.hud-level__cp') as HTMLSpanElement;
+    this.timerTime = this.root.querySelector('.hud-timer__time') as HTMLDivElement;
+    this.timerSub = this.root.querySelector('.hud-timer__sub') as HTMLDivElement;
+    this.speedValue = this.root.querySelector('.hud-speed__value') as HTMLSpanElement;
+    this.speedUnit = this.root.querySelector('.hud-speed__unit') as HTMLSpanElement;
+    this.speedBar = this.root.querySelector('.hud-speed__bar span') as HTMLSpanElement;
+  }
+
+  /** Levelname und Referenzzeiten unter dem Timer. */
+  setLevel(name: string, best: number | null, par: number | null): void {
+    this.levelName.textContent = name;
+    const parts: string[] = [];
+    if (best !== null) parts.push(`Bestzeit ${formatTime(best)}`);
+    if (par !== null) parts.push(`Richtzeit ${formatTime(par)}`);
+    this.timerSub.textContent = parts.join('  ·  ');
+    this.timerSub.dataset.waiting = '';
+  }
+
+  setCheckpoint(reached: number, total: number): void {
+    this.levelCheckpoints.textContent = total > 0 ? `Checkpoint ${reached}/${total}` : '';
+  }
+
+  setTimer(seconds: number, state: TimerState): void {
+    const text = formatTime(seconds);
+    if (text !== this.lastTimerText) {
+      this.timerTime.textContent = text;
+      this.lastTimerText = text;
+    }
+    this.timerTime.dataset.state = state;
+  }
+
+  setSpeed(metersPerSecond: number, unit: 'ms' | 'kmh'): void {
+    const formatted = formatSpeed(metersPerSecond, unit);
+    const text = `${formatted.value}${formatted.unit}`;
+    if (text !== this.lastSpeedText) {
+      this.speedValue.textContent = formatted.value;
+      this.speedUnit.textContent = formatted.unit;
+      this.lastSpeedText = text;
+    }
+    const ratio = clamp(metersPerSecond / 28, 0, 1);
+    this.speedBar.style.transform = `scaleX(${ratio.toFixed(3)})`;
+    this.speedBar.dataset.level = ratio > 0.62 ? 'fast' : ratio > 0.33 ? 'medium' : 'slow';
   }
 
   /** Tutorial-Hinweis unten in der Bildmitte; Text in [eckigen Klammern] wird als Taste dargestellt. */

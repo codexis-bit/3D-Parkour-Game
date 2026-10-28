@@ -1,24 +1,31 @@
 import * as THREE from 'three';
-import { GAME } from '../config/game';
+import type { Action } from '../config/input';
 import { MOVEMENT } from '../config/movement';
 import { DEFAULT_ENVIRONMENT } from '../config/render';
 import { Environment } from '../level/Environment';
 import { Level, type TriggerEvent } from '../level/Level';
+import { LEVELS, nextLevel } from '../level/levels';
 import { MeshFactory } from '../level/LevelVisuals';
 import { MaterialLibrary } from '../level/materials';
 import type { LevelData } from '../level/types';
+import { AttractCamera } from '../player/AttractCamera';
 import { CameraRig } from '../player/CameraRig';
 import { MOVE_STATE_LABELS } from '../player/MoveState';
 import { PlayerController } from '../player/PlayerController';
 import { RopeRenderer } from '../player/RopeRenderer';
+import { BestTimes } from '../ui/BestTimes';
 import { HUD } from '../ui/HUD';
+import { Menus } from '../ui/Menus';
 import { EventBus } from './EventBus';
 import type { GameEvents } from './events';
 import { FixedTimestep } from './FixedTimestep';
 import { Graphics } from './Graphics';
-import { createPlayerInput, Input } from './Input';
+import { createPlayerInput, Input, type PlayerInput } from './Input';
 import { initPhysics } from './Physics';
 import { PointerLock } from './PointerLock';
+import { RunTimer } from './RunTimer';
+import { SettingsStore, type Settings } from './Settings';
+import { defaultStore } from './storage';
 
 /** Steuerung für automatisierte Browser-Tests (nur mit `?test` in der URL aktiv). */
 export interface TestControls {
@@ -31,8 +38,21 @@ export interface TestControls {
   teleport: (x: number, y: number, z: number) => void;
 }
 
+/** Spielmodus: Menü (Kamerafahrt im Hintergrund), aktives Spiel, Pause oder Zielbildschirm. */
+type Mode = 'menu' | 'playing' | 'paused' | 'finished';
+
+function hasMovementIntent(input: PlayerInput): boolean {
+  return (
+    input.moveX !== 0 ||
+    input.moveY !== 0 ||
+    input.jumpPressed ||
+    input.slidePressed ||
+    input.grapplePressed
+  );
+}
+
 /**
- * Hauptklasse: verbindet Rendering, Eingabe, Physik-Takt, Level und Spieler.
+ * Hauptklasse: verbindet Rendering, Eingabe, Physik-Takt, Level, Spieler, UI und Spielablauf.
  *
  * Game-Loop: Pro Frame wird die Mausbewegung sofort auf die Kamera angewendet (kein Input-Lag),
  * die Physik läuft in festen 60-Hz-Schritten, gerendert wird mit Interpolation zwischen den Schritten.
@@ -45,31 +65,33 @@ export class Game {
   private readonly pointerLock: PointerLock;
   private readonly fixed = new FixedTimestep(MOVEMENT.physicsHz);
   private readonly cameraRig: CameraRig;
+  private readonly attract = new AttractCamera();
+  private readonly timer = new RunTimer();
+  private readonly settings: SettingsStore;
+  private readonly bestTimes: BestTimes;
+  private readonly menus: Menus;
+  private readonly hud: HUD;
   private readonly tickInput = createPlayerInput();
   private readonly renderFeet = new THREE.Vector3();
   private readonly hand = new THREE.Vector3();
   private readonly ropeCenter = new THREE.Vector3();
   private readonly triggerEvents: TriggerEvent[] = [];
   private readonly rope = new RopeRenderer();
-  private readonly hud: HUD;
   private materials: MaterialLibrary;
   private meshFactory: MeshFactory;
   private level: Level | null = null;
   private player: PlayerController | null = null;
+  private mode: Mode = 'menu';
+  private testMode = false;
   private lastTime = 0;
   private elapsed = 0;
-  private readonly overlay: HTMLDivElement;
-  private readonly devHud: HTMLDivElement;
 
   constructor(
     canvas: HTMLCanvasElement,
     private readonly ui: HTMLElement,
   ) {
     this.graphics = new Graphics(canvas);
-    this.graphics.setQuality('high');
-    this.graphics.setHorizontalFov(95);
     this.environment = new Environment(this.graphics.scene, DEFAULT_ENVIRONMENT);
-    this.environment.setQuality(this.graphics.preset);
     this.materials = new MaterialLibrary(this.graphics.anisotropy);
     this.meshFactory = new MeshFactory(this.materials);
     this.graphics.scene.add(this.rope.object);
@@ -77,34 +99,173 @@ export class Game {
     this.pointerLock = new PointerLock(canvas);
     this.cameraRig = new CameraRig(this.graphics.camera, MOVEMENT.player.eyeHeightStand);
 
-    this.overlay = document.createElement('div');
-    this.overlay.className = 'click-to-play';
-    this.overlay.innerHTML = `<div><h1>${GAME.name}</h1><p>Klicken zum Spielen</p>
-      <p class="hint">WASD bewegen · Maus umsehen · Leertaste springen · Shift/Strg sliden ·
-      Rechtsklick/E Grappling Hook · R Checkpoint · T Neustart</p></div>`;
-    this.overlay.addEventListener('click', () => void this.pointerLock.request());
-    this.devHud = document.createElement('div');
-    this.devHud.className = 'dev-hud';
+    const store = defaultStore();
+    this.settings = new SettingsStore(store);
+    this.bestTimes = new BestTimes(store);
     this.hud = new HUD(this.ui);
-    this.ui.append(this.overlay, this.devHud);
+    this.hud.visible = false;
+    this.menus = new Menus(this.ui, this.settings, this.bestTimes, {
+      play: () => this.play(),
+      playLevel: (id) => this.playLevel(id),
+      resume: () => this.resume(),
+      restart: () => this.restartRun(),
+      nextLevel: () => this.playNext(),
+      quitToMenu: () => this.showMainMenu(),
+    });
 
-    this.pointerLock.onChange((locked) => {
-      this.input.enabled = locked;
-      this.input.reset();
-      this.overlay.hidden = locked;
-    });
-    this.input.onAction((action) => {
-      if (!this.input.enabled) return;
-      if (action === 'respawn') this.respawn();
-      else if (action === 'restart') this.restart();
-    });
+    this.settings.subscribe((settings) => this.applySettings(settings));
+    this.pointerLock.onChange(this.handlePointerLock);
+    this.input.onAction(this.handleAction);
+    window.addEventListener('beforeunload', this.handleBeforeUnload);
   }
 
   async init(): Promise<void> {
     await initPhysics();
   }
 
-  loadLevel(data: LevelData): void {
+  start(): void {
+    this.lastTime = performance.now();
+    requestAnimationFrame(this.frame);
+  }
+
+  /** Hauptmenü mit Kamerafahrt durch `level` (Standard: aktuelles oder erstes Level). */
+  showMainMenu(level?: LevelData): void {
+    const data = level ?? this.level?.data ?? LEVELS[0];
+    if (!data) return;
+    if (this.level?.data.id !== data.id) this.loadLevel(data);
+    this.mode = 'menu';
+    this.setInputActive(false);
+    this.pointerLock.exit();
+    this.hud.visible = false;
+    this.hud.setHint(null);
+    this.rope.hide();
+    this.refreshMenuLevels();
+    this.menus.show('main', true);
+  }
+
+  /** Startet ein Level direkt (z. B. über `?level=…`). */
+  playLevel(id: string): void {
+    const data =
+      LEVELS.find((level) => level.id === id) ??
+      (this.level?.data.id === id ? this.level.data : undefined);
+    if (data) this.startRun(data);
+  }
+
+  /** Lädt ein beliebiges Level (auch Entwickler-Levels) und startet es. */
+  playLevelData(data: LevelData): void {
+    this.startRun(data);
+  }
+
+  /**
+   * Nur für automatisierte Browser-Tests (URL-Parameter `?test`): Steuerung ohne Pointer Lock
+   * aktivieren und die Blickrichtung direkt setzen.
+   */
+  enableTestControls(): TestControls {
+    this.testMode = true;
+    if (this.mode !== 'playing' && this.level) this.startRun(this.level.data);
+    this.setInputActive(true);
+    const log: string[] = [];
+    const emit = this.events.emit.bind(this.events);
+    this.events.emit = ((type: keyof GameEvents, payload: GameEvents[keyof GameEvents]) => {
+      log.push(`${String(type)} ${JSON.stringify(payload)}`);
+      emit(type, payload);
+    }) as typeof this.events.emit;
+    return {
+      look: (yawDeg, pitchDeg = 0) =>
+        this.cameraRig.setOrientation((yawDeg * Math.PI) / 180, (pitchDeg * Math.PI) / 180),
+      state: () => {
+        const player = this.player;
+        if (!player) return '';
+        return `${MOVE_STATE_LABELS[player.state]} · ${player.horizontalSpeed.toFixed(1)} m/s · vy ${player.velocity.y.toFixed(1)}`;
+      },
+      events: () => log.splice(0, log.length),
+      position: () => {
+        const p = this.player?.feet;
+        return p ? [p.x, p.y, p.z] : [0, 0, 0];
+      },
+      teleport: (x, y, z) => this.player?.teleport(new THREE.Vector3(x, y, z)),
+    };
+  }
+
+  // ---------------------------------------------------------------- Spielablauf
+
+  /** „Spielen“: erstes noch nicht geschafftes Level (sonst das erste). */
+  private play(): void {
+    const next = LEVELS.find((level) => !this.bestTimes.completed(level.id)) ?? LEVELS[0];
+    if (next) this.startRun(next);
+  }
+
+  private playNext(): void {
+    const current = this.level?.data;
+    const next = current ? nextLevel(current.id) : undefined;
+    if (next) this.startRun(next);
+    else this.showMainMenu();
+  }
+
+  private startRun(data: LevelData): void {
+    if (this.level?.data.id !== data.id) this.loadLevel(data);
+    this.resetRun();
+    this.mode = 'playing';
+    this.menus.close();
+    this.hud.visible = true;
+    this.requestLock();
+  }
+
+  private restartRun(): void {
+    const data = this.level?.data;
+    if (data) this.startRun(data);
+  }
+
+  private resume(): void {
+    if (this.mode !== 'paused' && this.mode !== 'playing') return;
+    this.mode = 'playing';
+    this.menus.close();
+    this.requestLock();
+  }
+
+  /** Fortschritt, Timer und Spieler auf den Levelstart setzen. */
+  private resetRun(): void {
+    this.level?.resetProgress();
+    this.respawn(false);
+    this.timer.arm();
+    this.hud.setHint(null);
+    this.updateHudMeta();
+  }
+
+  /** Zurück zum letzten Checkpoint (bzw. zum Start, wenn noch keiner erreicht wurde). */
+  private respawn(announce = true): void {
+    const level = this.level;
+    const player = this.player;
+    if (!level || !player) return;
+    const { feet, yaw } = level.respawnPoint;
+    player.teleport(feet);
+    this.cameraRig.setOrientation(yaw, 0);
+    this.cameraRig.snapEyeHeight(player.targetEyeHeight);
+    this.fixed.reset();
+    this.hud.setCheckpoint(level.checkpointIndex + 1, level.checkpoints.length);
+    if (announce) this.events.emit('respawn', { checkpoint: level.checkpointIndex });
+  }
+
+  private finish(fraction: number): void {
+    const level = this.level;
+    if (!level) return;
+    const time = this.timer.finish(fraction);
+    const result = this.bestTimes.submit(level.data.id, time);
+    this.mode = 'finished';
+    this.setInputActive(false);
+    this.pointerLock.exit();
+    this.rope.hide();
+    this.hud.setHint(null);
+    this.events.emit('finish', { levelId: level.data.id, time, newRecord: result.newRecord });
+    this.updateHudMeta();
+    this.menus.showFinish({
+      level: level.data,
+      result,
+      hasNext: nextLevel(level.data.id) !== undefined,
+    });
+  }
+
+  private loadLevel(data: LevelData): void {
     this.unloadLevel();
     this.materials = new MaterialLibrary(this.graphics.anisotropy);
     this.meshFactory = new MeshFactory(this.materials);
@@ -116,57 +277,11 @@ export class Game {
     this.environment.apply(level.environment);
     this.player = new PlayerController(level.physics, this.events, MOVEMENT, level.spawnFeet);
     this.player.setGrapplePoints(level.grapplePoints);
-    this.restart();
-  }
-
-  start(): void {
-    this.lastTime = performance.now();
-    requestAnimationFrame(this.frame);
-  }
-
-  /**
-   * Nur für automatisierte Browser-Tests (URL-Parameter `?test`): Steuerung ohne Pointer Lock
-   * aktivieren und die Blickrichtung direkt setzen.
-   */
-  enableTestControls(): TestControls {
-    this.input.enabled = true;
-    this.overlay.hidden = true;
-    const log: string[] = [];
-    const emit = this.events.emit.bind(this.events);
-    this.events.emit = ((type: keyof GameEvents, payload: GameEvents[keyof GameEvents]) => {
-      log.push(`${String(type)} ${JSON.stringify(payload)}`);
-      emit(type, payload);
-    }) as typeof this.events.emit;
-    return {
-      look: (yawDeg, pitchDeg = 0) =>
-        this.cameraRig.setOrientation((yawDeg * Math.PI) / 180, (pitchDeg * Math.PI) / 180),
-      state: () => this.devHud.textContent ?? '',
-      events: () => log.splice(0, log.length),
-      position: () => {
-        const p = this.player?.feet;
-        return p ? [p.x, p.y, p.z] : [0, 0, 0];
-      },
-      teleport: (x, y, z) => this.player?.teleport(new THREE.Vector3(x, y, z)),
-    };
-  }
-
-  /** Zurück zum letzten Checkpoint (bzw. zum Start, wenn noch keiner erreicht wurde). */
-  private respawn(): void {
-    const level = this.level;
-    const player = this.player;
-    if (!level || !player) return;
-    const { feet, yaw } = level.respawnPoint;
-    player.teleport(feet);
-    this.cameraRig.setOrientation(yaw, 0);
-    this.cameraRig.snapEyeHeight(player.targetEyeHeight);
-    this.fixed.reset();
-    this.events.emit('respawn', { checkpoint: level.checkpointIndex });
-  }
-
-  /** Sofort-Neustart des Levels: Fortschritt zurücksetzen und zum Start. */
-  private restart(): void {
-    this.level?.resetProgress();
-    this.respawn();
+    const path = [level.spawnFeet, ...level.checkpoints.map((c) => c.respawn)];
+    if (level.goal) path.push(level.goal.position);
+    this.attract.setPath(path);
+    this.respawn(false);
+    this.updateHudMeta();
   }
 
   private unloadLevel(): void {
@@ -179,26 +294,136 @@ export class Game {
     this.rope.hide();
   }
 
+  private updateHudMeta(): void {
+    const data = this.level?.data;
+    if (!data) return;
+    this.hud.setLevel(data.name, this.bestTimes.get(data.id), data.parTime ?? null);
+    this.hud.setCheckpoint(
+      (this.level?.checkpointIndex ?? -1) + 1,
+      this.level?.checkpoints.length ?? 0,
+    );
+  }
+
+  private refreshMenuLevels(): void {
+    const next = LEVELS.find((level) => !this.bestTimes.completed(level.id)) ?? null;
+    this.menus.setLevels(LEVELS, next);
+  }
+
+  // ---------------------------------------------------------------- Eingabe & Pointer Lock
+
+  private setInputActive(active: boolean): void {
+    this.input.enabled = active;
+    this.input.reset();
+  }
+
+  private requestLock(): void {
+    if (this.testMode) {
+      this.setInputActive(true);
+      return;
+    }
+    if (this.pointerLock.locked) {
+      this.setInputActive(true);
+      return;
+    }
+    void this.pointerLock.request().then((locked) => {
+      // Ohne Lock (z. B. Browser-Sperrzeit nach Esc) braucht es einen weiteren Klick.
+      if (!locked && this.mode === 'playing') this.menus.show('click', true);
+    });
+  }
+
+  private readonly handlePointerLock = (locked: boolean): void => {
+    if (this.testMode) return;
+    if (locked) {
+      if (this.mode === 'playing' || this.mode === 'paused') {
+        this.mode = 'playing';
+        this.menus.close();
+        this.setInputActive(true);
+      }
+      return;
+    }
+    this.setInputActive(false);
+    if (this.mode === 'playing') {
+      this.mode = 'paused';
+      this.menus.show('pause', true);
+    }
+  };
+
+  private readonly handleAction = (action: Action): void => {
+    if (
+      action === 'restart' &&
+      (this.mode === 'playing' || this.mode === 'finished' || this.mode === 'paused')
+    ) {
+      this.restartRun();
+      return;
+    }
+    if (this.mode !== 'playing' || !this.input.enabled) return;
+    if (action === 'respawn') {
+      this.respawn();
+    } else if (action === 'pause') {
+      // Esc gibt der Browser selbst frei; P pausiert über das Freigeben des Pointer Locks.
+      if (this.testMode) {
+        this.mode = 'paused';
+        this.setInputActive(false);
+        this.menus.show('pause', true);
+      } else {
+        this.pointerLock.exit();
+      }
+    }
+  };
+
+  /** Schutz vor versehentlichem Schließen (z. B. Strg+W beim Sliden). */
+  private readonly handleBeforeUnload = (event: BeforeUnloadEvent): void => {
+    if (this.mode === 'playing' && !this.testMode) event.preventDefault();
+  };
+
+  private applySettings(settings: Settings): void {
+    this.cameraRig.sensitivity = settings.sensitivity;
+    this.cameraRig.invertY = settings.invertY;
+    this.graphics.setHorizontalFov(settings.fov);
+    this.graphics.setQuality(settings.quality);
+    this.environment.setQuality(this.graphics.preset);
+  }
+
+  // ---------------------------------------------------------------- Loop
+
   private readonly frame = (now: number): void => {
     const dt = Math.min((now - this.lastTime) / 1000, 0.25);
     this.lastTime = now;
     this.elapsed += dt;
 
     const look = this.input.consumeLook();
-    if (this.input.enabled) this.cameraRig.applyLook(look.x, look.y);
+    if (this.mode === 'playing' && this.input.enabled) this.cameraRig.applyLook(look.x, look.y);
 
     const level = this.level;
     const player = this.player;
     if (level && player) {
-      const steps = this.input.enabled ? this.fixed.advance(dt) : 0;
-      for (let i = 0; i < steps; i++) this.tick(this.fixed.dt, level, player);
-      const alpha = this.input.enabled ? this.fixed.alpha : 1;
+      let alpha = 1;
+      if (this.mode === 'playing' && this.input.enabled) {
+        const steps = this.fixed.advance(dt);
+        for (let i = 0; i < steps && this.mode === 'playing'; i++)
+          this.tick(this.fixed.dt, level, player);
+        alpha = this.fixed.alpha;
+      } else if (this.mode === 'menu') {
+        // Im Menü laufen nur die Plattformen weiter (Kamerafahrt im Hintergrund).
+        const steps = this.fixed.advance(dt);
+        for (let i = 0; i < steps; i++) {
+          level.fixedUpdate(this.fixed.dt);
+          level.physics.step();
+        }
+        alpha = this.fixed.alpha;
+      }
       level.frameUpdate(dt, alpha);
-      player.interpolatedFeet(alpha, this.renderFeet);
-      this.cameraRig.update(dt, this.renderFeet, player);
-      this.environment.update(this.renderFeet, this.graphics.camera);
-      this.updateGrappleVisuals(level, player);
-      this.updateDevHud(player);
+
+      if (this.mode === 'menu') {
+        this.attract.update(dt, this.graphics.camera);
+        this.environment.update(this.graphics.camera.position, this.graphics.camera);
+      } else {
+        player.interpolatedFeet(alpha, this.renderFeet);
+        this.cameraRig.update(dt, this.renderFeet, player);
+        this.environment.update(this.renderFeet, this.graphics.camera);
+        this.updateGrappleVisuals(level, player);
+        this.updateHud(player);
+      }
     }
 
     this.graphics.render();
@@ -207,9 +432,14 @@ export class Game {
 
   private tick(dt: number, level: Level, player: PlayerController): void {
     this.input.sampleTick(this.tickInput);
+    if (this.timer.armed && hasMovementIntent(this.tickInput)) {
+      this.timer.start();
+      this.events.emit('timerStart', { levelId: level.data.id });
+    }
     level.fixedUpdate(dt);
     level.physics.step();
     player.fixedUpdate(dt, this.tickInput, this.cameraRig.getView());
+    this.timer.tick(dt);
     this.handleTriggers(level, player);
   }
 
@@ -227,14 +457,14 @@ export class Game {
           const total = level.checkpoints.length;
           this.events.emit('checkpoint', { index: event.index, total });
           this.hud.toast(`Checkpoint ${event.index + 1}/${total}`, 'good');
+          this.hud.setCheckpoint(event.index + 1, total);
           break;
         }
         case 'hint':
           this.hud.setHint(event.text);
           break;
         case 'goal':
-          this.hud.toast('Ziel!', 'good', 2.5);
-          this.restart();
+          if (this.timer.running) this.finish(event.fraction);
           return;
         case 'death':
           this.events.emit('death', { reason: event.reason });
@@ -243,6 +473,12 @@ export class Game {
           return;
       }
     }
+  }
+
+  private updateHud(player: PlayerController): void {
+    const state = this.timer.running ? 'running' : this.timer.finished ? 'finished' : 'waiting';
+    this.hud.setTimer(this.timer.time, state);
+    this.hud.setSpeed(player.horizontalSpeed, this.settings.current.speedUnit);
   }
 
   /** Seil, Hervorhebung des Ziels und HUD-Indikator. */
@@ -273,12 +509,5 @@ export class Game {
       slack = Math.max(0, grapple.ropeLength - distance) * 0.35;
     }
     this.rope.update(this.hand, active.position, grapple.hookProgress, slack, this.elapsed);
-  }
-
-  private updateDevHud(player: PlayerController): void {
-    const v = player.velocity;
-    this.devHud.textContent = `${MOVE_STATE_LABELS[player.state]} · ${player.horizontalSpeed.toFixed(
-      1,
-    )} m/s · vy ${v.y.toFixed(1)}`;
   }
 }
