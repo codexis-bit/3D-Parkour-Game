@@ -4,6 +4,8 @@ MOMENTUM verwendet **keine externen Grafik- oder Audio-Assets**.
 
 - **Geometrie & Texturen:** prozedural im Code erzeugt (`src/level/materials.ts`, `src/level/geometry.ts`).
 - **Himmel:** Gradient-Shader (`src/level/Environment.ts`).
+- **Sounds:** zur Laufzeit per WebAudio synthetisiert – gefiltertes Rauschen und Oszillatoren mit
+  Hüllkurven (`src/audio/synth.ts`, `src/audio/AudioManager.ts`). Es gibt keine Audiodateien.
 
 ## Bibliotheken
 

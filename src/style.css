@@ -864,6 +864,21 @@ kbd {
   animation: toast-in 0.25s ease-out;
 }
 
+/* Tempo-Vignette: dunkelt die Ränder bei hoher Geschwindigkeit leicht ab (Tunnelblick). */
+.speed-fx {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 52%,
+    rgba(10, 18, 34, 0.32) 80%,
+    rgba(6, 10, 22, 0.62) 100%
+  );
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+
 .flash {
   position: absolute;
   inset: 0;

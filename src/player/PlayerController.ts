@@ -63,6 +63,8 @@ export class PlayerController implements PlayerContext {
   grounded = false;
   /** Kontinuierlicher Schrittzähler (für Head-Bob und Schrittgeräusche). */
   stride = 0;
+  /** Schrittzähler vor dem letzten Tick (Interpolation des Head-Bobs). */
+  previousStride = 0;
   /** Sekunden seit dem letzten Bodenkontakt. */
   airTime = 0;
   /** Aufprallgeschwindigkeit der letzten Landung (m/s, positiv). */
@@ -145,6 +147,7 @@ export class PlayerController implements PlayerContext {
 
   fixedUpdate(dt: number, input: PlayerInput, view: PlayerView): void {
     this.previousFeet.copy(this.body.feet);
+    this.previousStride = this.stride;
     this.input = input;
     this.view = view;
 

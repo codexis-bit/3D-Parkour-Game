@@ -29,6 +29,7 @@ export class HUD {
   private readonly markerLabel: HTMLSpanElement;
   private readonly toastBox: HTMLDivElement;
   private readonly flashBox: HTMLDivElement;
+  private readonly speedFx: HTMLDivElement;
   private readonly hintBox: HTMLDivElement;
   private readonly levelName: HTMLSpanElement;
   private readonly levelCheckpoints: HTMLSpanElement;
@@ -41,11 +42,13 @@ export class HUD {
   private lastSpeedText = '';
   private readonly projected = new THREE.Vector3();
   private toastTimer = 0;
+  private lastSpeedFx = -1;
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
     this.root.className = 'hud';
     this.root.innerHTML = `
+      <div class="speed-fx"></div>
       <div class="hud-level"><span class="hud-level__name"></span><span class="hud-level__cp"></span></div>
       <div class="hud-timer"><div class="hud-timer__time">00:00.000</div><div class="hud-timer__sub"></div></div>
       <div class="hud-speed">
@@ -63,6 +66,7 @@ export class HUD {
     this.markerLabel = this.root.querySelector('.grapple-marker__label') as HTMLSpanElement;
     this.toastBox = this.root.querySelector('.toast') as HTMLDivElement;
     this.flashBox = this.root.querySelector('.flash') as HTMLDivElement;
+    this.speedFx = this.root.querySelector('.speed-fx') as HTMLDivElement;
     this.hintBox = this.root.querySelector('.hint-box') as HTMLDivElement;
     this.levelName = this.root.querySelector('.hud-level__name') as HTMLSpanElement;
     this.levelCheckpoints = this.root.querySelector('.hud-level__cp') as HTMLSpanElement;
@@ -107,6 +111,14 @@ export class HUD {
     const ratio = clamp(metersPerSecond / 28, 0, 1);
     this.speedBar.style.transform = `scaleX(${ratio.toFixed(3)})`;
     this.speedBar.dataset.level = ratio > 0.62 ? 'fast' : ratio > 0.33 ? 'medium' : 'slow';
+  }
+
+  /** Tempo-Vignette am Bildrand (0 = aus, 1 = volle Stärke). */
+  setSpeedEffect(intensity: number): void {
+    const value = Math.round(clamp(intensity, 0, 1) * 100) / 100;
+    if (value === this.lastSpeedFx) return;
+    this.lastSpeedFx = value;
+    this.speedFx.style.opacity = value.toFixed(2);
   }
 
   /** Tutorial-Hinweis unten in der Bildmitte; Text in [eckigen Klammern] wird als Taste dargestellt. */

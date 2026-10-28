@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { AudioManager, type AudioFrameState } from '../audio/AudioManager';
 import type { Action } from '../config/input';
 import { MOVEMENT } from '../config/movement';
 import { DEFAULT_ENVIRONMENT } from '../config/render';
@@ -10,7 +11,7 @@ import { MaterialLibrary } from '../level/materials';
 import type { LevelData } from '../level/types';
 import { AttractCamera } from '../player/AttractCamera';
 import { CameraRig } from '../player/CameraRig';
-import { MOVE_STATE_LABELS } from '../player/MoveState';
+import { MOVE_STATE_LABELS, MoveState } from '../player/MoveState';
 import { PlayerController } from '../player/PlayerController';
 import { RopeRenderer } from '../player/RopeRenderer';
 import { BestTimes } from '../ui/BestTimes';
@@ -65,6 +66,13 @@ export class Game {
   private readonly pointerLock: PointerLock;
   private readonly fixed = new FixedTimestep(MOVEMENT.physicsHz);
   private readonly cameraRig: CameraRig;
+  private readonly audio: AudioManager;
+  private readonly audioFrame: AudioFrameState = {
+    playing: false,
+    speed: 0,
+    verticalSpeed: 0,
+    state: MoveState.Grounded,
+  };
   private readonly attract = new AttractCamera();
   private readonly timer = new RunTimer();
   private readonly settings: SettingsStore;
@@ -98,6 +106,8 @@ export class Game {
     this.input = new Input(canvas);
     this.pointerLock = new PointerLock(canvas);
     this.cameraRig = new CameraRig(this.graphics.camera, MOVEMENT.player.eyeHeightStand);
+    this.cameraRig.attach(this.events);
+    this.audio = new AudioManager(this.events);
 
     const store = defaultStore();
     this.settings = new SettingsStore(store);
@@ -117,6 +127,14 @@ export class Game {
     this.pointerLock.onChange(this.handlePointerLock);
     this.input.onAction(this.handleAction);
     window.addEventListener('beforeunload', this.handleBeforeUnload);
+
+    // Audio darf erst nach einer Nutzeraktion starten (Autoplay-Regeln der Browser).
+    window.addEventListener('pointerdown', this.unlockAudio, true);
+    window.addEventListener('keydown', this.unlockAudio, true);
+    this.ui.addEventListener('click', (event) => {
+      if (event.target instanceof Element && event.target.closest('.btn')) this.audio.uiClick();
+    });
+    document.addEventListener('visibilitychange', () => this.audio.setSuspended(document.hidden));
   }
 
   async init(): Promise<void> {
@@ -371,6 +389,8 @@ export class Game {
     }
   };
 
+  private readonly unlockAudio = (): void => this.audio.unlock();
+
   /** Schutz vor versehentlichem Schließen (z. B. Strg+W beim Sliden). */
   private readonly handleBeforeUnload = (event: BeforeUnloadEvent): void => {
     if (this.mode === 'playing' && !this.testMode) event.preventDefault();
@@ -379,9 +399,15 @@ export class Game {
   private applySettings(settings: Settings): void {
     this.cameraRig.sensitivity = settings.sensitivity;
     this.cameraRig.invertY = settings.invertY;
+    this.cameraRig.effects = {
+      headBob: settings.headBob,
+      shake: settings.cameraShake,
+      dynamicFov: settings.dynamicFov,
+    };
     this.graphics.setHorizontalFov(settings.fov);
     this.graphics.setQuality(settings.quality);
     this.environment.setQuality(this.graphics.preset);
+    this.audio.setVolume(settings.volume);
   }
 
   // ---------------------------------------------------------------- Loop
@@ -416,15 +442,18 @@ export class Game {
 
       if (this.mode === 'menu') {
         this.attract.update(dt, this.graphics.camera);
+        this.graphics.setHorizontalFov(this.settings.current.fov);
         this.environment.update(this.graphics.camera.position, this.graphics.camera);
       } else {
         player.interpolatedFeet(alpha, this.renderFeet);
-        this.cameraRig.update(dt, this.renderFeet, player);
+        this.cameraRig.update(dt, this.renderFeet, player, alpha);
+        this.graphics.setHorizontalFov(this.settings.current.fov + this.cameraRig.fovOffset);
         this.environment.update(this.renderFeet, this.graphics.camera);
         this.updateGrappleVisuals(level, player);
         this.updateHud(player);
       }
     }
+    this.updateAudio(player);
 
     this.graphics.render();
     requestAnimationFrame(this.frame);
@@ -479,6 +508,17 @@ export class Game {
     const state = this.timer.running ? 'running' : this.timer.finished ? 'finished' : 'waiting';
     this.hud.setTimer(this.timer.time, state);
     this.hud.setSpeed(player.horizontalSpeed, this.settings.current.speedUnit);
+    this.hud.setSpeedEffect(this.mode === 'playing' ? this.cameraRig.speedIntensity : 0);
+  }
+
+  /** Wind-, Slide- und Wall-Run-Schleifen folgen dem Spieler; außerhalb des Spiels verstummen sie. */
+  private updateAudio(player: PlayerController | null): void {
+    const frame = this.audioFrame;
+    frame.playing = this.mode === 'playing' && this.input.enabled && player !== null;
+    frame.speed = player?.horizontalSpeed ?? 0;
+    frame.verticalSpeed = player?.velocity.y ?? 0;
+    frame.state = player?.state ?? MoveState.Grounded;
+    this.audio.update(frame);
   }
 
   /** Seil, Hervorhebung des Ziels und HUD-Indikator. */
