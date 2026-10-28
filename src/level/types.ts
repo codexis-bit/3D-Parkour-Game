@@ -64,7 +64,21 @@ export interface SlideTunnelElement {
   walls?: boolean;
 }
 
-export type LevelElement = PlatformElement | WallRunElement | RampElement | SlideTunnelElement;
+export type GrappleMode = 'pull' | 'swing';
+
+/**
+ * Grapple-Punkt (orange). `pull` zieht den Spieler zum Punkt, `swing` lässt ihn am Seil pendeln.
+ */
+export interface GrappleElement {
+  type: 'grapple';
+  pos: Vec3;
+  mode: GrappleMode;
+  /** Überschreibt die Standard-Reichweite (m). */
+  range?: number;
+}
+
+export type LevelElement =
+  PlatformElement | WallRunElement | RampElement | SlideTunnelElement | GrappleElement;
 
 export interface LevelSpawn {
   /** Fußposition. */

@@ -1,6 +1,6 @@
 import './style.css';
 import { GAME } from './config/game';
-import { Game } from './core/Game';
+import { Game, type TestControls } from './core/Game';
 import { sandboxLevel } from './level/levels/sandbox';
 
 async function boot(): Promise<void> {
@@ -27,7 +27,7 @@ async function boot(): Promise<void> {
 declare global {
   interface Window {
     /** Test-Hook für automatisierte Browser-Tests (nur mit `?test` in der URL). */
-    momentumTest?: ReturnType<Game['enableTestControls']>;
+    momentumTest?: TestControls;
   }
 }
 

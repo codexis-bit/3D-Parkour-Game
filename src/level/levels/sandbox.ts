@@ -51,6 +51,11 @@ export const sandboxLevel: LevelData = {
     { type: 'wallrun', pos: [9.8, 3, -26], size: [0.5, 6, 24] },
     { type: 'wallrun', pos: [14.2, 3, -26], size: [0.5, 6, 24] },
 
+    // Grappling Hook: Turm mit Pull-Punkt an der Kante, frei hängender Schwungpunkt
+    { type: 'platform', pos: [-6, 4, -32], size: [6, 8, 6], style: 'trim' },
+    { type: 'grapple', pos: [-6, 10, -28.5], mode: 'pull' },
+    { type: 'grapple', pos: [0, 13, -16], mode: 'swing' },
+
     // Sprungstrecke auf 2 m Höhe: Lücken mit 3 / 4 / 5 / 6 m
     { type: 'ramp', from: [30, 0, 12], to: [30, 2, 0], width: 4 },
     { type: 'platform', pos: [30, 1, -2], size: [4, 2, 4] },

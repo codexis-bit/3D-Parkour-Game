@@ -14,4 +14,10 @@ export type GameEvents = {
   wallRunStart: { speed: number };
   wallRunEnd: { reason: 'timeout' | 'lost' | 'cancel' | 'slow' | 'jump' | 'land' };
   wallJump: { speed: number };
+  grappleFire: { pointId: number; distance: number };
+  grappleAttach: { pointId: number; mode: 'pull' | 'swing' };
+  grappleRelease: { speed: number; reason: GrappleReleaseReason };
+  grappleCancel: Record<string, never>;
 };
+
+export type GrappleReleaseReason = 'released' | 'arrived' | 'jump' | 'timeout' | 'blocked';

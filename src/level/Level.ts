@@ -1,21 +1,33 @@
 import * as THREE from 'three';
+import { MOVEMENT } from '../config/movement';
 import { DEFAULT_ENVIRONMENT, type EnvironmentSettings } from '../config/render';
 import { DEG2RAD } from '../core/math';
 import { Physics } from '../core/Physics';
-import type { MaterialLibrary } from './materials';
+import type { GrapplePoint } from '../mechanics/Grapple';
 import { resolveStaticBoxes, toVector3, type ResolvedBox } from './shapes';
 import type { LevelData } from './types';
 
-/** Optionaler Render-Kontext – ohne ihn wird nur die Physik gebaut (z. B. in Tests). */
+/** Darstellung eines Grapple-Punkts (animiert, hervorhebbar). */
+export interface GrapplePointVisual {
+  readonly object: THREE.Object3D;
+  setHighlighted(highlighted: boolean): void;
+  update(time: number): void;
+}
+
+/** Erzeugt alle Meshes eines Levels – nur im Browser vorhanden, in Tests entfällt sie. */
+export interface LevelVisualFactory {
+  staticMeshes(boxes: readonly ResolvedBox[]): THREE.Object3D[];
+  grapplePoint(point: GrapplePoint): GrapplePointVisual;
+}
+
 export interface LevelRenderContext {
   scene: THREE.Scene;
-  materials: MaterialLibrary;
-  buildMeshes: (boxes: readonly ResolvedBox[], materials: MaterialLibrary) => THREE.Object3D[];
+  factory: LevelVisualFactory;
 }
 
 /**
  * Laufzeit-Repräsentation eines Levels: Physik-World mit allen Collidern, optional die Meshes,
- * Spawnpunkt und später Trigger, Checkpoints und bewegliche Plattformen.
+ * Spawnpunkt, Grapple-Punkte und (später) Trigger, Checkpoints und bewegliche Plattformen.
  */
 export class Level {
   readonly physics: Physics;
@@ -24,7 +36,11 @@ export class Level {
   /** Blickrichtung beim Spawn (rad). */
   readonly spawnYaw: number;
   readonly environment: EnvironmentSettings;
+  readonly grapplePoints: GrapplePoint[] = [];
   private readonly root = new THREE.Group();
+  private readonly grappleVisuals = new Map<number, GrapplePointVisual>();
+  private highlightedGrapple: number | null = null;
+  private time = 0;
 
   constructor(
     readonly data: LevelData,
@@ -41,6 +57,18 @@ export class Level {
         { kind: box.surface, elementId: box.elementIndex, wallRunnable: box.wallRunnable },
       );
     }
+
+    data.elements.forEach((element, index) => {
+      if (element.type === 'grapple') {
+        this.grapplePoints.push({
+          id: index,
+          position: toVector3(element.pos),
+          mode: element.mode,
+          range: element.range ?? MOVEMENT.grapple.range,
+        });
+      }
+    });
+
     // Ein Schritt baut die Beschleunigungsstruktur für Ray-/Shape-Casts auf.
     this.physics.step();
 
@@ -48,11 +76,7 @@ export class Level {
     this.spawnYaw = data.spawn.yaw * DEG2RAD;
     this.environment = { ...DEFAULT_ENVIRONMENT, ...data.environment };
 
-    if (render) {
-      this.root.name = `level:${data.id}`;
-      for (const object of render.buildMeshes(this.boxes, render.materials)) this.root.add(object);
-      render.scene.add(this.root);
-    }
+    if (render) this.buildVisuals(render);
   }
 
   /** Fester Physik-Tick: bewegliche Teile aktualisieren (vor dem Physik-Schritt). */
@@ -61,8 +85,19 @@ export class Level {
   }
 
   /** Pro Frame: rein optische Animationen. */
-  frameUpdate(_dt: number, _alpha: number): void {
-    // Animierte Elemente folgen in späteren Meilensteinen.
+  frameUpdate(dt: number, _alpha: number): void {
+    this.time += dt;
+    for (const visual of this.grappleVisuals.values()) visual.update(this.time);
+  }
+
+  /** Hebt den anvisierten Grapple-Punkt hervor (null = keiner). */
+  setGrappleHighlight(pointId: number | null): void {
+    if (pointId === this.highlightedGrapple) return;
+    if (this.highlightedGrapple !== null) {
+      this.grappleVisuals.get(this.highlightedGrapple)?.setHighlighted(false);
+    }
+    this.highlightedGrapple = pointId;
+    if (pointId !== null) this.grappleVisuals.get(pointId)?.setHighlighted(true);
   }
 
   dispose(): void {
@@ -74,5 +109,16 @@ export class Level {
       });
     }
     this.physics.dispose();
+  }
+
+  private buildVisuals(render: LevelRenderContext): void {
+    this.root.name = `level:${this.data.id}`;
+    for (const object of render.factory.staticMeshes(this.boxes)) this.root.add(object);
+    for (const point of this.grapplePoints) {
+      const visual = render.factory.grapplePoint(point);
+      this.grappleVisuals.set(point.id, visual);
+      this.root.add(visual.object);
+    }
+    render.scene.add(this.root);
   }
 }

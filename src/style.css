@@ -119,3 +119,96 @@ body {
   font: 13px var(--mono);
   pointer-events: none;
 }
+
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  border-radius: 50%;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.crosshair span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.crosshair--target {
+  border-color: var(--accent-2);
+  transform: scale(1.25);
+}
+
+.crosshair--target span {
+  background: var(--accent-2);
+}
+
+.crosshair--attached {
+  border-color: var(--accent-2);
+  border-style: dashed;
+}
+
+.grapple-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
+.grapple-marker::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: -20px;
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--accent-2);
+  border-radius: 8px;
+  transform: rotate(45deg);
+  box-shadow: 0 0 14px rgba(255, 122, 26, 0.7);
+  animation: grapple-pulse 0.9s ease-in-out infinite;
+}
+
+.grapple-marker--cooling::before {
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: none;
+}
+
+.grapple-marker__label {
+  position: absolute;
+  left: 30px;
+  top: -9px;
+  font: 700 12px var(--font);
+  letter-spacing: 0.12em;
+  color: var(--accent-2);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+}
+
+@keyframes grapple-pulse {
+  0%,
+  100% {
+    transform: rotate(45deg) scale(1);
+  }
+  50% {
+    transform: rotate(45deg) scale(1.12);
+  }
+}

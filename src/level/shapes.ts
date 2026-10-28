@@ -144,6 +144,9 @@ function resolveElement(element: LevelElement, index: number, out: ResolvedBox[]
     case 'slideTunnel':
       resolveSlideTunnel(element, index, out);
       return;
+    case 'grapple':
+      // Keine statische Geometrie (wird als eigenes, animiertes Objekt dargestellt).
+      return;
   }
 }
 

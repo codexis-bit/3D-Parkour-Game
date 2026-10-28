@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { jumpVelocity, type MovementConfig } from '../config/movement';
 import type { EventBus } from '../core/EventBus';
-import type { GameEvents, JumpKind } from '../core/events';
+import type { GameEvents, GrappleReleaseReason, JumpKind } from '../core/events';
 import { createPlayerInput, type PlayerInput } from '../core/Input';
 import type { Physics } from '../core/Physics';
 import {
@@ -12,6 +12,7 @@ import {
   horizontalSpeed,
   wishDirection,
 } from '../mechanics/Locomotion';
+import { Grapple, type GrapplePoint } from '../mechanics/Grapple';
 import { Slide } from '../mechanics/Slide';
 import { computeWallJumpVelocity } from '../mechanics/WallJump';
 import { createWallContact, WallRun, type WallRunResult } from '../mechanics/WallRun';
@@ -32,7 +33,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 /**
  * Spieler-Controller als State Machine
- * (Grounded, Airborne, Sliding, WallRunning – Grappling und Vaulting folgen).
+ * (Grounded, Airborne, Sliding, WallRunning, Grappling – Vaulting folgt).
  *
  * Ablauf pro festem Physik-Tick:
  * 1. Eingabe-Flanken in Timer übernehmen (Jump Buffer), Cooldowns weiterzählen,
@@ -52,6 +53,7 @@ export class PlayerController implements PlayerContext {
   readonly wish = new THREE.Vector3();
   readonly slide: Slide;
   readonly wallRun: WallRun;
+  readonly grapple: Grapple;
   /** Eingabe des aktuellen Ticks. */
   input: PlayerInput = createPlayerInput();
   /** Blickrichtung des aktuellen Ticks (Wall Jump und Grapple brauchen sie). */
@@ -67,9 +69,15 @@ export class PlayerController implements PlayerContext {
 
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
+  private grappleBufferTimer = 0;
   private jumpCutArmed = false;
   private readonly desired = new THREE.Vector3();
+  /** Zusätzliche Verschiebung in diesem Tick (z. B. Seilkorrektur), nicht Teil der Geschwindigkeit. */
+  private readonly correction = new THREE.Vector3();
   private readonly wallContact = createWallContact();
+  private readonly eye = new THREE.Vector3();
+  private readonly look = new THREE.Vector3();
+  private readonly center = new THREE.Vector3();
 
   constructor(
     readonly physics: Physics,
@@ -81,6 +89,7 @@ export class PlayerController implements PlayerContext {
     this.previousFeet.copy(spawnFeet);
     this.slide = new Slide(cfg.slide, cfg.gravity);
     this.wallRun = new WallRun(cfg.wallRun);
+    this.grapple = new Grapple(cfg.grapple);
     this.fsm = new StateMachine<MoveState>(MoveState.Airborne, MOVE_TRANSITIONS, (from, to) =>
       this.onStateChange(from, to),
     );
@@ -116,6 +125,16 @@ export class PlayerController implements PlayerContext {
     };
   }
 
+  /** Augenposition (Kamera ohne Effekte) in Weltkoordinaten. */
+  eyePosition(out: THREE.Vector3): THREE.Vector3 {
+    return out.set(this.body.feet.x, this.body.feet.y + this.targetEyeHeight, this.body.feet.z);
+  }
+
+  /** Grapple-Punkte des aktuellen Levels. */
+  setGrapplePoints(points: readonly GrapplePoint[]): void {
+    this.grapple.setPoints(points);
+  }
+
   /** Interpolierte Fußposition für das Rendering zwischen zwei Physik-Ticks. */
   interpolatedFeet(alpha: number, out: THREE.Vector3): THREE.Vector3 {
     return out.lerpVectors(this.previousFeet, this.body.feet, alpha);
@@ -126,12 +145,16 @@ export class PlayerController implements PlayerContext {
     this.input = input;
     this.view = view;
 
+    this.correction.set(0, 0, 0);
     this.carryWithPlatform();
     if (input.jumpPressed) this.jumpBufferTimer = this.cfg.jump.bufferTime;
+    if (input.grapplePressed) this.grappleBufferTimer = this.cfg.grapple.bufferTime;
     this.slide.tick(dt);
     this.wallRun.tick(dt);
+    this.grapple.tick(dt);
     wishDirection(input.moveX, input.moveY, view.yaw, this.wish);
     this.body.probeGround(0.6, this.ground);
+    this.updateGrappleHook(dt);
 
     switch (this.fsm.state) {
       case MoveState.Grounded:
@@ -143,6 +166,9 @@ export class PlayerController implements PlayerContext {
       case MoveState.WallRunning:
         this.updateWallRunning(dt);
         break;
+      case MoveState.Grappling:
+        this.updateGrappling(dt);
+        break;
       default:
         this.updateAirborne(dt);
         break;
@@ -150,6 +176,7 @@ export class PlayerController implements PlayerContext {
 
     this.integrate(dt);
     this.jumpBufferTimer = Math.max(0, this.jumpBufferTimer - dt);
+    this.grappleBufferTimer = Math.max(0, this.grappleBufferTimer - dt);
     this.fsm.tick(dt);
   }
 
@@ -163,9 +190,11 @@ export class PlayerController implements PlayerContext {
     this.coyoteTimer = 0;
     this.jumpBufferTimer = 0;
     this.jumpCutArmed = false;
+    this.grappleBufferTimer = 0;
     this.airTime = 0;
     this.slide.reset();
     this.wallRun.resetMemory();
+    this.grapple.reset();
     this.fsm.force(MoveState.Airborne);
   }
 
@@ -258,7 +287,91 @@ export class PlayerController implements PlayerContext {
     else this.advanceStride(this.horizontalSpeed * dt * 1.25, true);
   }
 
+  private updateGrappling(dt: number): void {
+    const grapple = this.grapple;
+    if (!this.input.grappleHeld) {
+      this.releaseGrapple('released');
+      return;
+    }
+    if (this.jumpBufferTimer > 0) {
+      this.velocity.y = Math.max(this.velocity.y, this.cfg.grapple.jumpReleaseUpSpeed);
+      this.consumeJump();
+      this.releaseGrapple('jump');
+      this.events.emit('jump', { kind: 'grapple', speed: this.horizontalSpeed });
+      return;
+    }
+    this.body.center(this.center);
+    if (grapple.mode === 'pull') {
+      const result = grapple.updatePull(this, this.center, dt);
+      if (result !== 'continue') this.releaseGrapple(result);
+    } else {
+      grapple.updateSwing(this, this.center, dt, this.correction);
+    }
+  }
+
   // ---------------------------------------------------------------- Aktionen
+
+  /** Zielerfassung, Abschuss und Hakenflug – läuft unabhängig vom Movement-State. */
+  private updateGrappleHook(dt: number): void {
+    const grapple = this.grapple;
+    this.eyePosition(this.eye);
+    if (grapple.phase === 'idle') {
+      const cp = Math.cos(this.view.pitch);
+      this.look.set(
+        -Math.sin(this.view.yaw) * cp,
+        Math.sin(this.view.pitch),
+        -Math.cos(this.view.yaw) * cp,
+      );
+      grapple.updateTarget(this.body, this.eye, this.look);
+      const wantsFire = this.grappleBufferTimer > 0 && this.input.grappleHeld;
+      if (wantsFire && this.fsm.state !== MoveState.Vaulting) {
+        const point = grapple.fire(this.eye);
+        if (point) {
+          this.grappleBufferTimer = 0;
+          this.events.emit('grappleFire', {
+            pointId: point.id,
+            distance: this.eye.distanceTo(point.position),
+          });
+        }
+      }
+    }
+    if (grapple.phase !== 'firing') return;
+    const result = grapple.updateHook(dt, this.input.grappleHeld);
+    if (result === 'cancelled') {
+      this.events.emit('grappleCancel', {});
+    } else if (result === 'attached') {
+      this.attachGrapple();
+    }
+  }
+
+  private attachGrapple(): void {
+    const point = this.grapple.active;
+    if (!point) return;
+    if (this.body.isCrouched) this.body.setCrouched(false);
+    this.grapple.attach(this.body.center(this.center));
+    if (this.fsm.state === MoveState.WallRunning) {
+      this.wallRun.leave(this.velocity, 0);
+      this.events.emit('wallRunEnd', { reason: 'cancel' });
+    }
+    this.jumpCutArmed = false;
+    this.fsm.transition(MoveState.Grappling);
+    this.events.emit('grappleAttach', { pointId: point.id, mode: point.mode });
+  }
+
+  private releaseGrapple(reason: GrappleReleaseReason): void {
+    const cfg = this.cfg.grapple;
+    const v = this.velocity;
+    if (reason === 'arrived') {
+      // Am Punkt angekommen: Schwung dämpfen und über die Kante heben.
+      v.multiplyScalar(cfg.pullArriveKeep);
+      v.y = Math.max(v.y, cfg.pullEndUpBoost);
+    } else if (reason === 'released' && this.grapple.mode === 'swing' && v.y > -1) {
+      v.y += cfg.swingReleaseUpBoost;
+    }
+    this.grapple.detach();
+    this.fsm.transition(this.grounded && v.y <= 0.5 ? MoveState.Grounded : MoveState.Airborne);
+    this.events.emit('grappleRelease', { speed: v.length(), reason });
+  }
 
   private startSlide(): void {
     this.body.setCrouched(true);
@@ -381,7 +494,7 @@ export class PlayerController implements PlayerContext {
     this.body.setSnapToGround(onGround);
 
     const preVelocityY = this.velocity.y;
-    this.desired.copy(this.velocity).multiplyScalar(dt);
+    this.desired.copy(this.velocity).multiplyScalar(dt).add(this.correction);
     this.body.move(this.desired, this.lastMove);
     clipAgainstContacts(this.velocity, this.lastMove.contacts, this.lastMove.contactCount, {
       walkableNormalY: this.body.walkableNormalY,

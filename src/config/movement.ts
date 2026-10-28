@@ -152,6 +152,56 @@ export interface WallJumpConfig {
   reach: number;
 }
 
+export interface GrappleConfig {
+  /** Maximale Reichweite zum Grapple-Punkt. */
+  range: number;
+  /** Näher als das wird ein Punkt ignoriert. */
+  minDistance: number;
+  /** Zielkegel um die Blickrichtung (halber Öffnungswinkel in Grad). */
+  aimConeDeg: number;
+  /** Fluggeschwindigkeit des Hakens (Zeit bis zum Einrasten = Distanz / Tempo). */
+  hookSpeed: number;
+  /** Ein zu früher Tastendruck wird so lange gemerkt, bis ein Ziel erfasst ist. */
+  bufferTime: number;
+  /** Abklingzeit nach dem Lösen. */
+  cooldown: number;
+
+  /** Pull: Beschleunigung zum Punkt. */
+  pullAcceleration: number;
+  pullMaxSpeed: number;
+  /** Pull: Restgravitation während des Ziehens. */
+  pullGravityScale: number;
+  /** Pull: Dämpfung quer zur Zugrichtung (1/s) – macht den Zug zielgenau. */
+  pullPerpDamping: number;
+  /** Pull: Ab diesem Abstand löst sich das Seil automatisch. */
+  pullDetachDistance: number;
+  /** Pull: Aufwärtstempo beim automatischen Lösen (hilft über Kanten). */
+  pullEndUpBoost: number;
+  /** Pull: Anteil des Tempos, der beim Ankommen erhalten bleibt (kein wildes Überschießen). */
+  pullArriveKeep: number;
+  pullMaxDuration: number;
+
+  /** Swing: Seillänge beim Einrasten = Abstand × Faktor (< 1 sorgt für einen Ruck). */
+  swingRopeShorten: number;
+  swingMinLength: number;
+  /** Swing: Längeres Seil wird auf diese Länge eingeholt (flacherer, besser steuerbarer Bogen). */
+  swingMaxLength: number;
+  /** Swing: Gravitationsfaktor am Seil (< 1 = etwas mehr Schwung und Höhe). */
+  swingGravityScale: number;
+  /** Swing: So schnell wird das Seil nach dem Einrasten auf Ziellänge eingeholt (m/s). */
+  swingReelSpeed: number;
+  /** Swing: Beschleunigung durch WASD („Pumpen“). */
+  swingPumpAcceleration: number;
+  /** Swing: Luftwiderstand (1/s). */
+  swingDrag: number;
+  swingMaxSpeed: number;
+  /** Swing: Zusätzliches Aufwärtstempo beim Loslassen in der Aufwärtsbewegung. */
+  swingReleaseUpBoost: number;
+
+  /** Sprung während des Grapples: Seil lösen und mindestens so schnell nach oben. */
+  jumpReleaseUpSpeed: number;
+}
+
 export interface MovementConfig {
   /** Feste Physik-Taktrate. */
   physicsHz: number;
@@ -164,6 +214,7 @@ export interface MovementConfig {
   slide: SlideConfig;
   wallRun: WallRunConfig;
   wallJump: WallJumpConfig;
+  grapple: GrappleConfig;
 }
 
 export const MOVEMENT: MovementConfig = {
@@ -254,6 +305,36 @@ export const MOVEMENT: MovementConfig = {
     keepAlong: 0.95,
     maxSpeedGain: 1.5,
     reach: 0.6,
+  },
+
+  grapple: {
+    range: 36,
+    minDistance: 2.5,
+    aimConeDeg: 11,
+    hookSpeed: 220,
+    bufferTime: 0.15,
+    cooldown: 0.35,
+
+    pullAcceleration: 75,
+    pullMaxSpeed: 26,
+    pullGravityScale: 0.25,
+    pullPerpDamping: 5,
+    pullDetachDistance: 2.2,
+    pullEndUpBoost: 5,
+    pullArriveKeep: 0.55,
+    pullMaxDuration: 2.5,
+
+    swingRopeShorten: 0.92,
+    swingMinLength: 4,
+    swingMaxLength: 11,
+    swingGravityScale: 0.8,
+    swingReelSpeed: 12,
+    swingPumpAcceleration: 9,
+    swingDrag: 0.05,
+    swingMaxSpeed: 32,
+    swingReleaseUpBoost: 3,
+
+    jumpReleaseUpSpeed: 6.5,
   },
 };
 

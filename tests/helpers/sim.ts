@@ -44,6 +44,7 @@ export async function createSim(
   const level = new Level(data, cfg.physicsHz);
   const events = new EventBus<GameEvents>();
   const player = new PlayerController(level.physics, events, cfg, level.spawnFeet);
+  player.setGrapplePoints(level.grapplePoints);
   const input = createPlayerInput();
   const view: PlayerView = { yaw: level.spawnYaw, pitch: 0 };
   const log: Sim['log'] = [];

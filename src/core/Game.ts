@@ -4,12 +4,14 @@ import { MOVEMENT } from '../config/movement';
 import { DEFAULT_ENVIRONMENT } from '../config/render';
 import { Environment } from '../level/Environment';
 import { Level } from '../level/Level';
-import { buildStaticMeshes } from '../level/LevelVisuals';
+import { MeshFactory } from '../level/LevelVisuals';
 import { MaterialLibrary } from '../level/materials';
 import type { LevelData } from '../level/types';
 import { CameraRig } from '../player/CameraRig';
 import { MOVE_STATE_LABELS } from '../player/MoveState';
 import { PlayerController } from '../player/PlayerController';
+import { RopeRenderer } from '../player/RopeRenderer';
+import { HUD } from '../ui/HUD';
 import { EventBus } from './EventBus';
 import type { GameEvents } from './events';
 import { FixedTimestep } from './FixedTimestep';
@@ -17,6 +19,15 @@ import { Graphics } from './Graphics';
 import { createPlayerInput, Input } from './Input';
 import { initPhysics } from './Physics';
 import { PointerLock } from './PointerLock';
+
+/** Steuerung für automatisierte Browser-Tests (nur mit `?test` in der URL aktiv). */
+export interface TestControls {
+  look: (yawDeg: number, pitchDeg?: number) => void;
+  state: () => string;
+  /** Liefert alle seit dem letzten Aufruf aufgetretenen Events. */
+  events: () => string[];
+  position: () => [number, number, number];
+}
 
 /**
  * Hauptklasse: verbindet Rendering, Eingabe, Physik-Takt, Level und Spieler.
@@ -34,10 +45,16 @@ export class Game {
   private readonly cameraRig: CameraRig;
   private readonly tickInput = createPlayerInput();
   private readonly renderFeet = new THREE.Vector3();
+  private readonly hand = new THREE.Vector3();
+  private readonly ropeCenter = new THREE.Vector3();
+  private readonly rope = new RopeRenderer();
+  private readonly hud: HUD;
   private materials: MaterialLibrary;
+  private meshFactory: MeshFactory;
   private level: Level | null = null;
   private player: PlayerController | null = null;
   private lastTime = 0;
+  private elapsed = 0;
   private readonly overlay: HTMLDivElement;
   private readonly devHud: HTMLDivElement;
 
@@ -51,6 +68,8 @@ export class Game {
     this.environment = new Environment(this.graphics.scene, DEFAULT_ENVIRONMENT);
     this.environment.setQuality(this.graphics.preset);
     this.materials = new MaterialLibrary(this.graphics.anisotropy);
+    this.meshFactory = new MeshFactory(this.materials);
+    this.graphics.scene.add(this.rope.object);
     this.input = new Input(canvas);
     this.pointerLock = new PointerLock(canvas);
     this.cameraRig = new CameraRig(this.graphics.camera, MOVEMENT.player.eyeHeightStand);
@@ -58,10 +77,12 @@ export class Game {
     this.overlay = document.createElement('div');
     this.overlay.className = 'click-to-play';
     this.overlay.innerHTML = `<div><h1>${GAME.name}</h1><p>Klicken zum Spielen</p>
-      <p class="hint">WASD bewegen · Maus umsehen · Leertaste springen · Shift/Strg sliden · R zurücksetzen</p></div>`;
+      <p class="hint">WASD bewegen · Maus umsehen · Leertaste springen · Shift/Strg sliden ·
+      Rechtsklick/E Grappling Hook · R zurücksetzen</p></div>`;
     this.overlay.addEventListener('click', () => void this.pointerLock.request());
     this.devHud = document.createElement('div');
     this.devHud.className = 'dev-hud';
+    this.hud = new HUD(this.ui);
     this.ui.append(this.overlay, this.devHud);
 
     this.pointerLock.onChange((locked) => {
@@ -81,14 +102,15 @@ export class Game {
   loadLevel(data: LevelData): void {
     this.unloadLevel();
     this.materials = new MaterialLibrary(this.graphics.anisotropy);
+    this.meshFactory = new MeshFactory(this.materials);
     const level = new Level(data, MOVEMENT.physicsHz, {
       scene: this.graphics.scene,
-      materials: this.materials,
-      buildMeshes: buildStaticMeshes,
+      factory: this.meshFactory,
     });
     this.level = level;
     this.environment.apply(level.environment);
     this.player = new PlayerController(level.physics, this.events, MOVEMENT, level.spawnFeet);
+    this.player.setGrapplePoints(level.grapplePoints);
     this.respawn();
   }
 
@@ -101,13 +123,24 @@ export class Game {
    * Nur für automatisierte Browser-Tests (URL-Parameter `?test`): Steuerung ohne Pointer Lock
    * aktivieren und die Blickrichtung direkt setzen.
    */
-  enableTestControls(): { look: (yawDeg: number, pitchDeg?: number) => void; state: () => string } {
+  enableTestControls(): TestControls {
     this.input.enabled = true;
     this.overlay.hidden = true;
+    const log: string[] = [];
+    const emit = this.events.emit.bind(this.events);
+    this.events.emit = ((type: keyof GameEvents, payload: GameEvents[keyof GameEvents]) => {
+      log.push(`${String(type)} ${JSON.stringify(payload)}`);
+      emit(type, payload);
+    }) as typeof this.events.emit;
     return {
       look: (yawDeg, pitchDeg = 0) =>
         this.cameraRig.setOrientation((yawDeg * Math.PI) / 180, (pitchDeg * Math.PI) / 180),
       state: () => this.devHud.textContent ?? '',
+      events: () => log.splice(0, log.length),
+      position: () => {
+        const p = this.player?.feet;
+        return p ? [p.x, p.y, p.z] : [0, 0, 0];
+      },
     };
   }
 
@@ -124,12 +157,15 @@ export class Game {
     this.player = null;
     this.level?.dispose();
     this.level = null;
+    this.meshFactory.dispose();
     this.materials.dispose();
+    this.rope.hide();
   }
 
   private readonly frame = (now: number): void => {
     const dt = Math.min((now - this.lastTime) / 1000, 0.25);
     this.lastTime = now;
+    this.elapsed += dt;
 
     const look = this.input.consumeLook();
     if (this.input.enabled) this.cameraRig.applyLook(look.x, look.y);
@@ -144,6 +180,7 @@ export class Game {
       player.interpolatedFeet(alpha, this.renderFeet);
       this.cameraRig.update(dt, this.renderFeet, player);
       this.environment.update(this.renderFeet, this.graphics.camera);
+      this.updateGrappleVisuals(level, player);
       this.updateDevHud(player);
     }
 
@@ -157,6 +194,36 @@ export class Game {
     level.physics.step();
     player.fixedUpdate(dt, this.tickInput, this.cameraRig.getView());
     if (player.feet.y < level.data.killY) this.respawn();
+  }
+
+  /** Seil, Hervorhebung des Ziels und HUD-Indikator. */
+  private updateGrappleVisuals(level: Level, player: PlayerController): void {
+    const grapple = player.grapple;
+    const camera = this.graphics.camera;
+    level.setGrappleHighlight(grapple.phase === 'idle' ? (grapple.target?.id ?? null) : null);
+    this.hud.updateGrapple(
+      {
+        target: grapple.phase === 'idle' ? (grapple.target?.position ?? null) : null,
+        mode: grapple.target?.mode ?? null,
+        attached: grapple.phase !== 'idle',
+        cooling: grapple.cooldown > 0,
+      },
+      camera,
+    );
+    const active = grapple.active;
+    if (!active || grapple.phase === 'idle') {
+      this.rope.hide();
+      return;
+    }
+    // „Hand“: rechts unten vor der Kamera.
+    camera.updateMatrixWorld();
+    this.hand.set(0.3, -0.34, -0.9).applyMatrix4(camera.matrixWorld);
+    let slack = 0;
+    if (grapple.phase === 'attached' && active.mode === 'swing') {
+      const distance = player.body.center(this.ropeCenter).distanceTo(active.position);
+      slack = Math.max(0, grapple.ropeLength - distance) * 0.35;
+    }
+    this.rope.update(this.hand, active.position, grapple.hookProgress, slack, this.elapsed);
   }
 
   private updateDevHud(player: PlayerController): void {
