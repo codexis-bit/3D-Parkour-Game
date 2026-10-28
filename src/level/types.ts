@@ -24,6 +24,11 @@ export interface PlatformElement extends BoxElementBase {
   style?: 'base' | 'trim';
 }
 
+/** Wand, an der man entlanglaufen und abspringen kann (blau markiert). */
+export interface WallRunElement extends BoxElementBase {
+  type: 'wallrun';
+}
+
 /**
  * Rampe von `from` nach `to` (jeweils Mitte der Oberkante am Anfang/Ende).
  * Die Oberseite verläuft exakt durch beide Punkte.
@@ -59,7 +64,7 @@ export interface SlideTunnelElement {
   walls?: boolean;
 }
 
-export type LevelElement = PlatformElement | RampElement | SlideTunnelElement;
+export type LevelElement = PlatformElement | WallRunElement | RampElement | SlideTunnelElement;
 
 export interface LevelSpawn {
   /** Fußposition. */

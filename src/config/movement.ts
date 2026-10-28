@@ -98,6 +98,60 @@ export interface SlideConfig {
   jumpSpeedMultiplier: number;
 }
 
+export interface WallRunConfig {
+  /** Horizontales Mindesttempo für den Start. */
+  minSpeed: number;
+  /** Mindesttempo entlang der Wand (wer frontal gegen die Wand springt, läuft nicht). */
+  minAlongSpeed: number;
+  /** Mindestabstand zum Boden, damit kein Wall Run in Kniehöhe startet. */
+  minHeight: number;
+  /** Erkennungsweite für Wände über den Kapselradius hinaus. */
+  detectDistance: number;
+  /** Wer schneller fällt, kann keinen Wall Run mehr starten. */
+  maxEntryFallSpeed: number;
+  /** Aufwärtstempo beim Start wird hierauf begrenzt (kleiner „Hüpfer“ an der Wand). */
+  entryUpSpeedMax: number;
+  /** Fallen beim Start wird auf dieses Tempo abgefangen. */
+  entryDownSpeedMax: number;
+  /** Anteil des Gesamttempos, der beim Andocken in Laufrichtung umgelenkt wird. */
+  entrySpeedKeep: number;
+  /** Zieltempo entlang der Wand. */
+  speed: number;
+  acceleration: number;
+  /** Abbremsen ohne Vorwärts-Eingabe. */
+  friction: number;
+  /** Maximale Dauer eines Wall Runs. */
+  duration: number;
+  /** Gravitationsfaktor am Anfang und am Ende des Wall Runs (steigt dazwischen an). */
+  gravityStart: number;
+  gravityEnd: number;
+  /** Exponent der Gravitationskurve (> 1: lange fast schwerelos, dann zunehmend). */
+  gravityCurve: number;
+  /** Maximale Fallgeschwindigkeit an der Wand. */
+  maxFallSpeed: number;
+  /** Leichter Zug zur Wand, damit der Kontakt nicht abreißt. */
+  stickSpeed: number;
+  /** Abstoß von der Wand, wenn der Wall Run regulär endet. */
+  exitPush: number;
+  /** Nach dem Ablösen bleibt so lange ein Wall Jump von dieser Wand möglich. */
+  wallJumpGrace: number;
+}
+
+export interface WallJumpConfig {
+  /** Aufwärtstempo des Wall Jumps. */
+  upSpeed: number;
+  /** Abstoß entlang der Wandnormalen. */
+  outSpeed: number;
+  /** Zusätzlicher Schub in Blickrichtung (ohne Anteil in die Wand hinein). */
+  lookBoost: number;
+  /** Anteil des Tempos entlang der Wand, der erhalten bleibt. */
+  keepAlong: number;
+  /** Maximaler Tempogewinn pro Wall Jump – verhindert endloses Aufschaukeln. */
+  maxSpeedGain: number;
+  /** Reichweite für Wall Jumps ohne vorherigen Wall Run (über den Kapselradius hinaus). */
+  reach: number;
+}
+
 export interface MovementConfig {
   /** Feste Physik-Taktrate. */
   physicsHz: number;
@@ -108,6 +162,8 @@ export interface MovementConfig {
   air: AirConfig;
   jump: JumpConfig;
   slide: SlideConfig;
+  wallRun: WallRunConfig;
+  wallJump: WallJumpConfig;
 }
 
 export const MOVEMENT: MovementConfig = {
@@ -167,6 +223,37 @@ export const MOVEMENT: MovementConfig = {
     minDuration: 0.3,
     jumpHeightMultiplier: 1,
     jumpSpeedMultiplier: 1.03,
+  },
+
+  wallRun: {
+    minSpeed: 5,
+    minAlongSpeed: 4,
+    minHeight: 0.5,
+    detectDistance: 0.45,
+    maxEntryFallSpeed: 16,
+    entryUpSpeedMax: 2.5,
+    entryDownSpeedMax: 1,
+    entrySpeedKeep: 0.85,
+    speed: 11,
+    acceleration: 18,
+    friction: 4,
+    duration: 1.5,
+    gravityStart: 0.05,
+    gravityEnd: 0.55,
+    gravityCurve: 2,
+    maxFallSpeed: 6,
+    stickSpeed: 1.5,
+    exitPush: 2.5,
+    wallJumpGrace: 0.2,
+  },
+
+  wallJump: {
+    upSpeed: 7.5,
+    outSpeed: 6.5,
+    lookBoost: 3,
+    keepAlong: 0.95,
+    maxSpeedGain: 1.5,
+    reach: 0.6,
   },
 };
 

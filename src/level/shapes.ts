@@ -117,6 +117,18 @@ function resolveElement(element: LevelElement, index: number, out: ResolvedBox[]
         castShadow: true,
       });
       return;
+    case 'wallrun':
+      out.push({
+        elementIndex: index,
+        center: toVector3(element.pos),
+        size: toVector3(element.size),
+        quaternion: quaternionFromDegrees(element.rot),
+        material: 'wallRun',
+        surface: 'wallrun',
+        wallRunnable: true,
+        castShadow: true,
+      });
+      return;
     case 'ramp': {
       const ramp = resolveRamp(element.from, element.to, element.width, element.thickness ?? 0.5);
       out.push({

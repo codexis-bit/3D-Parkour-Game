@@ -1,7 +1,8 @@
 import type * as THREE from 'three';
 import { CAMERA } from '../config/camera';
 import { clamp, damp, DEG2RAD, wrapAngle } from '../core/math';
-import type { PlayerController, PlayerView } from './PlayerController';
+import type { PlayerView } from './PlayerContext';
+import type { PlayerController } from './PlayerController';
 
 /**
  * First-Person-Kamera: Blick per Maus (Yaw/Pitch), Position an der interpolierten Spielerposition.

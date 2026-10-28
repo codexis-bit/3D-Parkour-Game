@@ -46,6 +46,11 @@ export const sandboxLevel: LevelData = {
     { type: 'platform', pos: [-30, 4.86, 7], size: [6, 1, 6] },
     { type: 'ramp', from: [-30, 5.36, 4], to: [-30, 0, -10.7], width: 6, thickness: 1 },
 
+    // Wall Run: einzelne Wand und ein Korridor für Wall-Jump-Ketten
+    { type: 'wallrun', pos: [-18, 3, -20], size: [0.5, 6, 24] },
+    { type: 'wallrun', pos: [9.8, 3, -26], size: [0.5, 6, 24] },
+    { type: 'wallrun', pos: [14.2, 3, -26], size: [0.5, 6, 24] },
+
     // Sprungstrecke auf 2 m Höhe: Lücken mit 3 / 4 / 5 / 6 m
     { type: 'ramp', from: [30, 0, 12], to: [30, 2, 0], width: 4 },
     { type: 'platform', pos: [30, 1, -2], size: [4, 2, 4] },

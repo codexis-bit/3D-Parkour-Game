@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { jumpVelocity, type MovementConfig } from '../config/movement';
 import type { EventBus } from '../core/EventBus';
 import type { GameEvents, JumpKind } from '../core/events';
-import type { PlayerInput } from '../core/Input';
+import { createPlayerInput, type PlayerInput } from '../core/Input';
 import type { Physics } from '../core/Physics';
 import {
   applyAirMovement,
@@ -13,6 +13,8 @@ import {
   wishDirection,
 } from '../mechanics/Locomotion';
 import { Slide } from '../mechanics/Slide';
+import { computeWallJumpVelocity } from '../mechanics/WallJump';
+import { createWallContact, WallRun, type WallRunResult } from '../mechanics/WallRun';
 import { MOVE_TRANSITIONS, MoveState } from './MoveState';
 import {
   createGroundProbe,
@@ -21,27 +23,25 @@ import {
   type GroundProbe,
   type MoveResult,
 } from './PlayerBody';
+import type { PlayerContext, PlayerView } from './PlayerContext';
 import { StateMachine } from './StateMachine';
+
+export type { PlayerView } from './PlayerContext';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-/** Blickrichtung der Kamera (rad), wird pro Tick an den Controller übergeben. */
-export interface PlayerView {
-  yaw: number;
-  pitch: number;
-}
-
 /**
- * Spieler-Controller als State Machine.
+ * Spieler-Controller als State Machine
+ * (Grounded, Airborne, Sliding, WallRunning – Grappling und Vaulting folgen).
  *
  * Ablauf pro festem Physik-Tick:
- * 1. Eingabe-Flanken in Timer übernehmen (Jump Buffer),
+ * 1. Eingabe-Flanken in Timer übernehmen (Jump Buffer), Cooldowns weiterzählen,
  * 2. Sensoren (Bodensonde),
  * 3. State-Logik setzt die Geschwindigkeit und löst ggf. Übergänge aus,
  * 4. Integration über den Character Controller inkl. Kollisionsauflösung,
  * 5. Kontaktauswertung (Landen, Kante verlassen).
  */
-export class PlayerController {
+export class PlayerController implements PlayerContext {
   readonly body: PlayerBody;
   readonly velocity = new THREE.Vector3();
   readonly fsm: StateMachine<MoveState>;
@@ -49,6 +49,13 @@ export class PlayerController {
   readonly previousFeet = new THREE.Vector3();
   readonly ground: GroundProbe = createGroundProbe();
   readonly lastMove: MoveResult = createMoveResult();
+  readonly wish = new THREE.Vector3();
+  readonly slide: Slide;
+  readonly wallRun: WallRun;
+  /** Eingabe des aktuellen Ticks. */
+  input: PlayerInput = createPlayerInput();
+  /** Blickrichtung des aktuellen Ticks (Wall Jump und Grapple brauchen sie). */
+  view: PlayerView = { yaw: 0, pitch: 0 };
   /** Bodenkontakt nach dem letzten Bewegungsschritt. */
   grounded = false;
   /** Kontinuierlicher Schrittzähler (für Head-Bob und Schrittgeräusche). */
@@ -57,16 +64,12 @@ export class PlayerController {
   airTime = 0;
   /** Aufprallgeschwindigkeit der letzten Landung (m/s, positiv). */
   lastImpactSpeed = 0;
-  readonly slide: Slide;
 
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
   private jumpCutArmed = false;
-  /** Blickrichtung aus dem letzten Tick (Wall Jump und Grapple brauchen sie). */
-  view: PlayerView = { yaw: 0, pitch: 0 };
-  private input: PlayerInput | null = null;
-  private readonly wish = new THREE.Vector3();
   private readonly desired = new THREE.Vector3();
+  private readonly wallContact = createWallContact();
 
   constructor(
     readonly physics: Physics,
@@ -77,6 +80,7 @@ export class PlayerController {
     this.body = new PlayerBody(physics, cfg.player, spawnFeet);
     this.previousFeet.copy(spawnFeet);
     this.slide = new Slide(cfg.slide, cfg.gravity);
+    this.wallRun = new WallRun(cfg.wallRun);
     this.fsm = new StateMachine<MoveState>(MoveState.Airborne, MOVE_TRANSITIONS, (from, to) =>
       this.onStateChange(from, to),
     );
@@ -84,6 +88,10 @@ export class PlayerController {
 
   get state(): MoveState {
     return this.fsm.state;
+  }
+
+  get timeInState(): number {
+    return this.fsm.timeInState;
   }
 
   get feet(): THREE.Vector3 {
@@ -99,9 +107,13 @@ export class PlayerController {
     return horizontalSpeed(this.velocity);
   }
 
-  /** Restzeiten für Debug-Anzeige. */
-  get timers(): { coyote: number; jumpBuffer: number } {
-    return { coyote: this.coyoteTimer, jumpBuffer: this.jumpBufferTimer };
+  /** Restzeiten für die Debug-Anzeige. */
+  get timers(): { coyote: number; jumpBuffer: number; wallJumpGrace: number } {
+    return {
+      coyote: this.coyoteTimer,
+      jumpBuffer: this.jumpBufferTimer,
+      wallJumpGrace: this.wallRun.graceTimer,
+    };
   }
 
   /** Interpolierte Fußposition für das Rendering zwischen zwei Physik-Ticks. */
@@ -117,6 +129,7 @@ export class PlayerController {
     this.carryWithPlatform();
     if (input.jumpPressed) this.jumpBufferTimer = this.cfg.jump.bufferTime;
     this.slide.tick(dt);
+    this.wallRun.tick(dt);
     wishDirection(input.moveX, input.moveY, view.yaw, this.wish);
     this.body.probeGround(0.6, this.ground);
 
@@ -126,6 +139,9 @@ export class PlayerController {
         break;
       case MoveState.Sliding:
         this.updateSliding(dt);
+        break;
+      case MoveState.WallRunning:
+        this.updateWallRunning(dt);
         break;
       default:
         this.updateAirborne(dt);
@@ -149,6 +165,7 @@ export class PlayerController {
     this.jumpCutArmed = false;
     this.airTime = 0;
     this.slide.reset();
+    this.wallRun.resetMemory();
     this.fsm.force(MoveState.Airborne);
   }
 
@@ -160,14 +177,13 @@ export class PlayerController {
 
   private updateGrounded(dt: number): void {
     if (this.jumpBufferTimer > 0 && this.tryJump('ground')) return;
-    const input = this.input;
     // Slide-Taste: mit genug Tempo sliden, sonst ducken.
-    if (input?.slidePressed && this.slide.canStart(this.horizontalSpeed)) {
+    if (this.input.slidePressed && this.slide.canStart(this.horizontalSpeed)) {
       this.startSlide();
       this.updateSliding(dt);
       return;
     }
-    if (input?.slideHeld) this.body.setCrouched(true);
+    if (this.input.slideHeld) this.body.setCrouched(true);
     else if (this.body.isCrouched) this.body.setCrouched(false); // nur mit Kopffreiheit
 
     const maxSpeed = this.body.isCrouched ? this.cfg.ground.crouchSpeed : this.cfg.ground.runSpeed;
@@ -181,26 +197,23 @@ export class PlayerController {
     this.slide.update(this.velocity, normal, this.wish, dt);
     this.velocity.y = -this.cfg.player.groundStickSpeed;
 
-    const released = !this.input?.slideHeld && this.fsm.timeInState >= this.cfg.slide.minDuration;
+    const released = !this.input.slideHeld && this.fsm.timeInState >= this.cfg.slide.minDuration;
     if (this.horizontalSpeed < this.cfg.slide.minSpeed || released) {
       this.fsm.transition(MoveState.Grounded);
       // Unter einem niedrigen Hindernis bleibt der Spieler automatisch geduckt.
-      if (!this.input?.slideHeld) this.body.setCrouched(false);
+      if (!this.input.slideHeld) this.body.setCrouched(false);
     }
   }
 
   private updateAirborne(dt: number): void {
-    if (this.jumpBufferTimer > 0 && this.coyoteTimer > 0) {
-      const kind: JumpKind = this.fsm.previous === MoveState.Sliding ? 'slide' : 'coyote';
-      if (this.tryJump(kind)) return;
-    }
+    if (this.jumpBufferTimer > 0 && this.tryAirJump()) return;
     // In der Luft nur geduckt bleiben, solange die Slide-Taste gehalten wird.
-    if (this.body.isCrouched && !this.input?.slideHeld) this.body.setCrouched(false);
+    if (this.body.isCrouched && !this.input.slideHeld) this.body.setCrouched(false);
 
     // Variable Sprunghöhe: Loslassen während des Steigens kappt die Aufwärtsgeschwindigkeit einmalig.
     if (this.jumpCutArmed) {
       if (this.velocity.y <= 0) this.jumpCutArmed = false;
-      else if (!this.input?.jumpHeld) {
+      else if (!this.input.jumpHeld) {
         this.velocity.y *= this.cfg.jump.cutMultiplier;
         this.jumpCutArmed = false;
       }
@@ -216,6 +229,33 @@ export class PlayerController {
     );
     applyAirMovement(this.velocity, this.wish, this.cfg.air, dt);
     this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
+
+    // Wall Run starten, wenn seitlich eine markierte Wand ist und die Bedingungen passen.
+    if (
+      !this.body.isCrouched &&
+      this.wallRun.findWall(
+        this.body,
+        this.view.yaw,
+        this.cfg.wallRun.detectDistance,
+        this.wallContact,
+      ) &&
+      this.wallRun.canStart(this, this.wallContact)
+    ) {
+      this.wallRun.start(this, this.wallContact);
+      this.jumpCutArmed = false;
+      this.fsm.transition(MoveState.WallRunning);
+      this.events.emit('wallRunStart', { speed: this.horizontalSpeed });
+    }
+  }
+
+  private updateWallRunning(dt: number): void {
+    if (this.jumpBufferTimer > 0) {
+      this.wallJump(this.wallRun.normal, this.wallRun.wallId, 'jump');
+      return;
+    }
+    const result = this.wallRun.update(this, dt);
+    if (result !== 'continue') this.endWallRun(result);
+    else this.advanceStride(this.horizontalSpeed * dt * 1.25, true);
   }
 
   // ---------------------------------------------------------------- Aktionen
@@ -225,6 +265,29 @@ export class PlayerController {
     const boosted = this.slide.start(this.velocity);
     this.fsm.transition(MoveState.Sliding);
     this.events.emit('slideStart', { speed: this.horizontalSpeed, boosted });
+  }
+
+  /**
+   * Sprung in der Luft, nach Priorität: Coyote-Sprung (Kante gerade verlassen),
+   * später Wall Jump (Gnadenfrist nach dem Wall Run), Wall Jump von einer Wand in Reichweite.
+   */
+  private tryAirJump(): boolean {
+    if (this.coyoteTimer > 0) {
+      const kind: JumpKind = this.fsm.previous === MoveState.Sliding ? 'slide' : 'coyote';
+      if (this.tryJump(kind)) return true;
+    }
+    if (this.wallRun.graceTimer > 0) {
+      this.wallJump(this.wallRun.graceNormal, this.wallRun.graceWallId, null);
+      return true;
+    }
+    if (
+      this.wallRun.findWall(this.body, this.view.yaw, this.cfg.wallJump.reach, this.wallContact) &&
+      this.wallContact.elementId !== this.wallRun.lastWallId
+    ) {
+      this.wallJump(this.wallContact.normal, this.wallContact.elementId, null);
+      return true;
+    }
+    return false;
   }
 
   private tryJump(kind: JumpKind): boolean {
@@ -245,13 +308,39 @@ export class PlayerController {
       this.velocity.z += platform.velocity.z * k;
       this.velocity.y += Math.max(0, platform.velocity.y) * k;
     }
-    this.jumpBufferTimer = 0;
-    this.coyoteTimer = 0;
-    this.jumpCutArmed = this.input?.jumpHeld ?? false;
+    this.consumeJump();
+    this.jumpCutArmed = this.input.jumpHeld;
     this.grounded = false;
     this.fsm.transition(MoveState.Airborne);
     this.events.emit('jump', { kind, speed: this.horizontalSpeed });
     return true;
+  }
+
+  /**
+   * Wall Jump: von der Wand weg, schräg nach oben, mit Schub in Blickrichtung.
+   * @param endReason Grund für das Wall-Run-Ende, falls gerade ein Wall Run läuft.
+   */
+  private wallJump(normal: THREE.Vector3, wallId: number, endReason: 'jump' | null): void {
+    computeWallJumpVelocity(this.velocity, normal, this.view.yaw, this.cfg.wallJump, this.velocity);
+    this.wallRun.markJumped(wallId);
+    this.consumeJump();
+    this.jumpCutArmed = false;
+    if (endReason) this.events.emit('wallRunEnd', { reason: endReason });
+    this.fsm.transition(MoveState.Airborne);
+    this.events.emit('jump', { kind: 'wall', speed: this.horizontalSpeed });
+    this.events.emit('wallJump', { speed: this.horizontalSpeed });
+  }
+
+  private endWallRun(reason: Exclude<WallRunResult, 'continue'>): void {
+    const push = reason === 'lost' ? 0 : this.cfg.wallRun.exitPush;
+    this.wallRun.leave(this.velocity, push);
+    this.fsm.transition(MoveState.Airborne);
+    this.events.emit('wallRunEnd', { reason });
+  }
+
+  private consumeJump(): void {
+    this.jumpBufferTimer = 0;
+    this.coyoteTimer = 0;
   }
 
   private land(impactVelocityY: number): void {
@@ -259,8 +348,12 @@ export class PlayerController {
     this.lastImpactSpeed = impact;
     this.velocity.y = -this.cfg.player.groundStickSpeed;
     this.jumpCutArmed = false;
+    if (this.fsm.state === MoveState.WallRunning) {
+      this.events.emit('wallRunEnd', { reason: 'land' });
+    }
+    this.wallRun.resetMemory();
     // Landen mit gehaltener Slide-Taste geht direkt in einen Slide über (Momentum bleibt).
-    if (this.input?.slideHeld && this.slide.canStart(this.horizontalSpeed)) this.startSlide();
+    if (this.input.slideHeld && this.slide.canStart(this.horizontalSpeed)) this.startSlide();
     else this.fsm.transition(MoveState.Grounded);
     this.events.emit('land', {
       impactSpeed: impact,
@@ -284,7 +377,8 @@ export class PlayerController {
 
   private integrate(dt: number): void {
     const state = this.fsm.state;
-    this.body.setSnapToGround(state === MoveState.Grounded || state === MoveState.Sliding);
+    const onGround = state === MoveState.Grounded || state === MoveState.Sliding;
+    this.body.setSnapToGround(onGround);
 
     const preVelocityY = this.velocity.y;
     this.desired.copy(this.velocity).multiplyScalar(dt);
@@ -292,20 +386,20 @@ export class PlayerController {
     clipAgainstContacts(this.velocity, this.lastMove.contacts, this.lastMove.contactCount, {
       walkableNormalY: this.body.walkableNormalY,
       stepHeight: this.cfg.player.stepHeight,
-      onGround: state === MoveState.Grounded || state === MoveState.Sliding,
+      onGround,
     });
     this.grounded = this.lastMove.grounded && this.velocity.y <= 0.5;
 
-    if (state === MoveState.Airborne && this.grounded) {
+    if ((state === MoveState.Airborne || state === MoveState.WallRunning) && this.grounded) {
       this.land(preVelocityY);
-    } else if ((state === MoveState.Grounded || state === MoveState.Sliding) && !this.grounded) {
+    } else if (onGround && !this.grounded) {
       // Kante verlassen, ohne zu springen → Coyote Time startet.
       this.coyoteTimer = this.cfg.jump.coyoteTime;
       this.fsm.transition(MoveState.Airborne);
     }
 
     this.airTime = this.grounded ? 0 : this.airTime + dt;
-    if (this.fsm.state === MoveState.Grounded) this.advanceStride(this.horizontalSpeed * dt);
+    if (this.fsm.state === MoveState.Grounded) this.advanceStride(this.horizontalSpeed * dt, false);
   }
 
   private onStateChange(from: MoveState, to: MoveState): void {
@@ -313,11 +407,11 @@ export class PlayerController {
     this.events.emit('stateChange', { from, to });
   }
 
-  private advanceStride(distance: number): void {
+  private advanceStride(distance: number, onWall: boolean): void {
     const before = Math.floor(this.stride);
     this.stride += distance / this.cfg.ground.stepLength;
     if (Math.floor(this.stride) !== before) {
-      this.events.emit('footstep', { speed: this.horizontalSpeed, onWall: false });
+      this.events.emit('footstep', { speed: this.horizontalSpeed, onWall });
     }
   }
 }

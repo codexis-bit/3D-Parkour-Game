@@ -11,4 +11,7 @@ export type GameEvents = {
   footstep: { speed: number; onWall: boolean };
   slideStart: { speed: number; boosted: boolean };
   slideEnd: { speed: number };
+  wallRunStart: { speed: number };
+  wallRunEnd: { reason: 'timeout' | 'lost' | 'cancel' | 'slow' | 'jump' | 'land' };
+  wallJump: { speed: number };
 };
