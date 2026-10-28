@@ -5,13 +5,25 @@ import type { GameEvents } from '../core/events';
 import { clamp, damp, DEG2RAD, easeInOutCubic, lerp, smoothstep, wrapAngle } from '../core/math';
 import { MoveState } from './MoveState';
 import type { PlayerView } from './PlayerContext';
-import type { PlayerController } from './PlayerController';
 
 /** Ein-/ausschaltbare Effekte (Optionsmenü, z. B. gegen Motion Sickness). */
 export interface CameraEffects {
   headBob: boolean;
   shake: boolean;
   dynamicFov: boolean;
+}
+
+/** Was die Kamera pro Frame vom Spieler braucht – der PlayerController erfüllt das strukturell. */
+export interface CameraSubject {
+  readonly horizontalSpeed: number;
+  readonly state: MoveState;
+  readonly targetEyeHeight: number;
+  /** Schrittzähler (ganzzahlig = Fuß setzt auf) aus diesem und dem vorigen Physik-Tick. */
+  readonly stride: number;
+  readonly previousStride: number;
+  readonly input: { readonly moveX: number };
+  readonly wallRun: { readonly normal: { readonly x: number; readonly z: number } };
+  readonly vault: { readonly progress: number };
 }
 
 /** Glattes Pseudo-Rauschen in [-1, 1] aus überlagerten Sinuswellen (für Kamera-Shake). */
@@ -154,7 +166,7 @@ export class CameraRig {
   }
 
   /** Pro Frame: Kamera an die interpolierte Fußposition setzen und alle Effekte anwenden. */
-  update(dt: number, feet: THREE.Vector3, player: PlayerController, alpha: number): void {
+  update(dt: number, feet: THREE.Vector3, player: CameraSubject, alpha: number): void {
     this.time += dt;
     const speed = player.horizontalSpeed;
     const state = player.state;

@@ -38,3 +38,29 @@ export const MOUSE_BINDINGS: Partial<Record<Action, readonly number[]>> = {
 
 /** Aktionen, die sofort (nicht im Physik-Takt) an UI/Spielablauf gemeldet werden. */
 export const UI_ACTIONS: readonly Action[] = ['respawn', 'restart', 'pause', 'debug'];
+
+/**
+ * Gamepad-Tasten im Standard-Mapping (https://w3c.github.io/gamepad/#remapping):
+ * 0 = A, 1 = B, 3 = Y, 5 = RB, 7 = RT, 8 = Select/Back, 9 = Start, 10 = L3.
+ */
+export const GAMEPAD_BINDINGS: Partial<Record<Action, readonly number[]>> = {
+  jump: [0],
+  slide: [1, 10],
+  grapple: [7, 5],
+  respawn: [3],
+  restart: [8],
+  pause: [9],
+};
+
+/** Gamepad-Feinabstimmung. */
+export const GAMEPAD = {
+  /** Radiale Deadzone der Sticks (0–1). */
+  stickDeadzone: 0.16,
+  /** Ab diesem Wert gilt ein analoger Trigger als gedrückt. */
+  triggerThreshold: 0.35,
+  /** Blickgeschwindigkeit bei vollem Ausschlag und Empfindlichkeit 1 (rad/s). */
+  lookYawSpeed: 3.6,
+  lookPitchSpeed: 2.4,
+  /** Kennlinie: > 1 = feineres Zielen bei kleinem Ausschlag. */
+  lookExponent: 1.7,
+} as const;

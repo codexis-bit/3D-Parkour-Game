@@ -900,6 +900,30 @@ kbd {
   }
 }
 
+/* ------------------------------------------------------------------ Debug (F3) */
+
+#ui > .debug-panel {
+  pointer-events: none;
+}
+
+.debug-panel {
+  position: absolute;
+  top: 70px;
+  right: 16px;
+  margin: 0;
+  padding: 10px 12px;
+  min-width: 330px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(6, 10, 18, 0.72);
+  color: #d8f3ff;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+  text-shadow: none;
+}
+
 /* ------------------------------------------------------------------ Kleine Bildschirme */
 
 @media (max-width: 720px) {

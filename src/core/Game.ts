@@ -3,6 +3,7 @@ import { AudioManager, type AudioFrameState } from '../audio/AudioManager';
 import type { Action } from '../config/input';
 import { MOVEMENT } from '../config/movement';
 import { DEFAULT_ENVIRONMENT } from '../config/render';
+import { DebugOverlay, type DebugFrameInfo } from '../debug/DebugOverlay';
 import { Environment } from '../level/Environment';
 import { Level, type TriggerEvent } from '../level/Level';
 import { LEVELS, nextLevel } from '../level/levels';
@@ -20,6 +21,7 @@ import { Menus } from '../ui/Menus';
 import { EventBus } from './EventBus';
 import type { GameEvents } from './events';
 import { FixedTimestep } from './FixedTimestep';
+import { GamepadInput } from './Gamepad';
 import { Graphics } from './Graphics';
 import { createPlayerInput, Input, type PlayerInput } from './Input';
 import { initPhysics } from './Physics';
@@ -63,6 +65,7 @@ export class Game {
   private readonly graphics: Graphics;
   private readonly environment: Environment;
   private readonly input: Input;
+  private readonly gamepad: GamepadInput;
   private readonly pointerLock: PointerLock;
   private readonly fixed = new FixedTimestep(MOVEMENT.physicsHz);
   private readonly cameraRig: CameraRig;
@@ -73,12 +76,14 @@ export class Game {
     verticalSpeed: 0,
     state: MoveState.Grounded,
   };
+  private readonly debugFrame: DebugFrameInfo;
   private readonly attract = new AttractCamera();
   private readonly timer = new RunTimer();
   private readonly settings: SettingsStore;
   private readonly bestTimes: BestTimes;
   private readonly menus: Menus;
   private readonly hud: HUD;
+  private readonly debug: DebugOverlay;
   private readonly tickInput = createPlayerInput();
   private readonly renderFeet = new THREE.Vector3();
   private readonly hand = new THREE.Vector3();
@@ -104,6 +109,7 @@ export class Game {
     this.meshFactory = new MeshFactory(this.materials);
     this.graphics.scene.add(this.rope.object);
     this.input = new Input(canvas);
+    this.gamepad = new GamepadInput(this.input);
     this.pointerLock = new PointerLock(canvas);
     this.cameraRig = new CameraRig(this.graphics.camera, MOVEMENT.player.eyeHeightStand);
     this.cameraRig.attach(this.events);
@@ -114,6 +120,14 @@ export class Game {
     this.bestTimes = new BestTimes(store);
     this.hud = new HUD(this.ui);
     this.hud.visible = false;
+    this.debug = new DebugOverlay(this.graphics.scene, this.ui);
+    this.debugFrame = {
+      dt: 0,
+      steps: 0,
+      physicsHz: MOVEMENT.physicsHz,
+      renderer: this.graphics.renderer,
+      runTime: 0,
+    };
     this.menus = new Menus(this.ui, this.settings, this.bestTimes, {
       play: () => this.play(),
       playLevel: (id) => this.playLevel(id),
@@ -295,6 +309,7 @@ export class Game {
     this.environment.apply(level.environment);
     this.player = new PlayerController(level.physics, this.events, MOVEMENT, level.spawnFeet);
     this.player.setGrapplePoints(level.grapplePoints);
+    this.debug.setLevel(level);
     const path = [level.spawnFeet, ...level.checkpoints.map((c) => c.respawn)];
     if (level.goal) path.push(level.goal.position);
     this.attract.setPath(path);
@@ -303,6 +318,7 @@ export class Game {
   }
 
   private unloadLevel(): void {
+    this.debug.setLevel(null);
     this.player?.dispose();
     this.player = null;
     this.level?.dispose();
@@ -367,6 +383,10 @@ export class Game {
   };
 
   private readonly handleAction = (action: Action): void => {
+    if (action === 'debug') {
+      this.debug.toggle();
+      return;
+    }
     if (
       action === 'restart' &&
       (this.mode === 'playing' || this.mode === 'finished' || this.mode === 'paused')
@@ -408,6 +428,7 @@ export class Game {
     this.graphics.setQuality(settings.quality);
     this.environment.setQuality(this.graphics.preset);
     this.audio.setVolume(settings.volume);
+    this.gamepad.sensitivity = settings.gamepadSensitivity;
   }
 
   // ---------------------------------------------------------------- Loop
@@ -417,21 +438,27 @@ export class Game {
     this.lastTime = now;
     this.elapsed += dt;
 
+    const active = this.mode === 'playing' && this.input.enabled;
     const look = this.input.consumeLook();
-    if (this.mode === 'playing' && this.input.enabled) this.cameraRig.applyLook(look.x, look.y);
+    const padLook = this.gamepad.poll(dt, active);
+    if (active) {
+      this.cameraRig.applyLook(look.x, look.y);
+      this.cameraRig.rotate(padLook.yaw, padLook.pitch);
+    }
 
     const level = this.level;
     const player = this.player;
+    let steps = 0;
     if (level && player) {
       let alpha = 1;
-      if (this.mode === 'playing' && this.input.enabled) {
-        const steps = this.fixed.advance(dt);
+      if (active) {
+        steps = this.fixed.advance(dt);
         for (let i = 0; i < steps && this.mode === 'playing'; i++)
           this.tick(this.fixed.dt, level, player);
         alpha = this.fixed.alpha;
       } else if (this.mode === 'menu') {
         // Im Menü laufen nur die Plattformen weiter (Kamerafahrt im Hintergrund).
-        const steps = this.fixed.advance(dt);
+        steps = this.fixed.advance(dt);
         for (let i = 0; i < steps; i++) {
           level.fixedUpdate(this.fixed.dt);
           level.physics.step();
@@ -454,6 +481,11 @@ export class Game {
       }
     }
     this.updateAudio(player);
+    const debugFrame = this.debugFrame;
+    debugFrame.dt = dt;
+    debugFrame.steps = steps;
+    debugFrame.runTime = this.timer.time;
+    this.debug.update(this.mode === 'menu' ? null : player, debugFrame);
 
     this.graphics.render();
     requestAnimationFrame(this.frame);
