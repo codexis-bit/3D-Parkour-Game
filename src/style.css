@@ -20,6 +20,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -82,4 +86,36 @@ body {
   color: var(--text);
   text-align: center;
   line-height: 1.6;
+}
+
+.click-to-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 12, 20, 0.45);
+  text-align: center;
+  cursor: pointer;
+}
+
+.click-to-play h1 {
+  margin: 0 0 8px;
+  font-size: 48px;
+  letter-spacing: 0.3em;
+}
+
+.click-to-play .hint {
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.dev-hud {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  font: 13px var(--mono);
+  pointer-events: none;
 }
