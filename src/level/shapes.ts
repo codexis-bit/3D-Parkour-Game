@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { SurfaceKind } from '../core/Physics';
+import type { LaunchInfo, SurfaceKind } from '../core/Physics';
 import { DEG2RAD } from '../core/math';
 import type { MaterialKey } from './materials';
 import type { LevelData, LevelElement, Vec3 } from './types';
@@ -20,6 +20,8 @@ export interface ResolvedBox {
   surface: SurfaceKind;
   wallRunnable: boolean;
   castShadow: boolean;
+  /** Nur bei Sprungpads. */
+  launch?: LaunchInfo;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -144,10 +146,33 @@ function resolveElement(element: LevelElement, index: number, out: ResolvedBox[]
     case 'slideTunnel':
       resolveSlideTunnel(element, index, out);
       return;
+    case 'jumpPad': {
+      const [w, d] = element.size ?? [3, 3];
+      const thickness = 0.3;
+      out.push({
+        elementIndex: index,
+        center: new THREE.Vector3(element.pos[0], element.pos[1] - thickness / 2, element.pos[2]),
+        size: new THREE.Vector3(w, thickness, d),
+        quaternion: new THREE.Quaternion(),
+        material: 'jumpPad',
+        surface: 'jumpPad',
+        wallRunnable: false,
+        castShadow: true,
+        launch: {
+          power: element.power,
+          pushX: element.push?.[0] ?? 0,
+          pushZ: element.push?.[1] ?? 0,
+        },
+      });
+      return;
+    }
     case 'grapple':
     case 'checkpoint':
     case 'killZone':
-      // Keine Kollisionsgeometrie – diese Elemente sind Auslöser bzw. eigene, animierte Objekte.
+    case 'moving':
+    case 'goal':
+    case 'hint':
+      // Keine statische Geometrie – Auslöser bzw. eigene, animierte Objekte.
       return;
   }
 }

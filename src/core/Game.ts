@@ -27,6 +27,8 @@ export interface TestControls {
   /** Liefert alle seit dem letzten Aufruf aufgetretenen Events. */
   events: () => string[];
   position: () => [number, number, number];
+  /** Setzt den Spieler an eine Position (Fußpunkt). */
+  teleport: (x: number, y: number, z: number) => void;
 }
 
 /**
@@ -144,6 +146,7 @@ export class Game {
         const p = this.player?.feet;
         return p ? [p.x, p.y, p.z] : [0, 0, 0];
       },
+      teleport: (x, y, z) => this.player?.teleport(new THREE.Vector3(x, y, z)),
     };
   }
 
@@ -211,17 +214,33 @@ export class Game {
   }
 
   private handleTriggers(level: Level, player: PlayerController): void {
-    level.checkTriggers(player.feet, player.body.radius, player.body.height, this.triggerEvents);
+    level.checkTriggers(
+      player.previousFeet,
+      player.feet,
+      player.body.radius,
+      player.body.height,
+      this.triggerEvents,
+    );
     for (const event of this.triggerEvents) {
-      if (event.type === 'checkpoint') {
-        const total = level.checkpoints.length;
-        this.events.emit('checkpoint', { index: event.index, total });
-        this.hud.toast(`Checkpoint ${event.index + 1}/${total}`, 'good');
-      } else {
-        this.events.emit('death', { reason: event.reason });
-        this.hud.flash();
-        this.respawn();
-        return;
+      switch (event.type) {
+        case 'checkpoint': {
+          const total = level.checkpoints.length;
+          this.events.emit('checkpoint', { index: event.index, total });
+          this.hud.toast(`Checkpoint ${event.index + 1}/${total}`, 'good');
+          break;
+        }
+        case 'hint':
+          this.hud.setHint(event.text);
+          break;
+        case 'goal':
+          this.hud.toast('Ziel!', 'good', 2.5);
+          this.restart();
+          return;
+        case 'death':
+          this.events.emit('death', { reason: event.reason });
+          this.hud.flash();
+          this.respawn();
+          return;
       }
     }
   }

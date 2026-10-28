@@ -3,7 +3,7 @@ import { EventBus } from '../../src/core/EventBus';
 import type { GameEvents } from '../../src/core/events';
 import { createPlayerInput, type PlayerInput } from '../../src/core/Input';
 import { initPhysics } from '../../src/core/Physics';
-import { Level } from '../../src/level/Level';
+import { Level, type TriggerEvent } from '../../src/level/Level';
 import type { LevelData, LevelElement } from '../../src/level/types';
 import { PlayerController, type PlayerView } from '../../src/player/PlayerController';
 
@@ -13,6 +13,8 @@ import { PlayerController, type PlayerView } from '../../src/player/PlayerContro
  */
 export interface Sim {
   level: Level;
+  /** Ausgelöste Trigger (Ziel, Tod, Checkpoints) – nur wenn `triggers` aktiv ist. */
+  triggers: { event: TriggerEvent; tick: number }[];
   player: PlayerController;
   input: PlayerInput;
   view: PlayerView;
@@ -31,7 +33,6 @@ export async function createSim(
   spawn: LevelData['spawn'] = { pos: [0, 0, 0], yaw: 0 },
   cfg: MovementConfig = MOVEMENT,
 ): Promise<Sim> {
-  await initPhysics();
   const data: LevelData = {
     id: 'test',
     name: 'Test',
@@ -41,7 +42,21 @@ export async function createSim(
     killY: -100,
     elements,
   };
+  return createLevelSim(data, cfg, false);
+}
+
+/**
+ * Simulation eines vollständigen Levels. Mit `triggers` werden wie im Spiel nach jedem Tick
+ * Ziel, Tod und Checkpoints geprüft (Respawn passiert dabei bewusst nicht).
+ */
+export async function createLevelSim(
+  data: LevelData,
+  cfg: MovementConfig = MOVEMENT,
+  triggers = true,
+): Promise<Sim> {
+  await initPhysics();
   const level = new Level(data, cfg.physicsHz);
+  const pending: TriggerEvent[] = [];
   const events = new EventBus<GameEvents>();
   const player = new PlayerController(level.physics, events, cfg, level.spawnFeet);
   player.setGrapplePoints(level.grapplePoints);
@@ -51,6 +66,7 @@ export async function createSim(
 
   const sim: Sim = {
     level,
+    triggers: [],
     player,
     input,
     view,
@@ -63,6 +79,16 @@ export async function createSim(
         level.fixedUpdate(sim.dt);
         level.physics.step();
         player.fixedUpdate(sim.dt, input, view);
+        if (triggers) {
+          level.checkTriggers(
+            player.previousFeet,
+            player.feet,
+            player.body.radius,
+            player.body.height,
+            pending,
+          );
+          for (const event of pending) sim.triggers.push({ event, tick: sim.tick });
+        }
         input.jumpPressed = false;
         input.slidePressed = false;
         input.grapplePressed = false;

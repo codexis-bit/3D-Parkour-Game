@@ -231,6 +231,14 @@ export interface LandingConfig {
   hardSpeedKeep: number;
 }
 
+export interface JumpPadConfig {
+  /**
+   * Horizontales Tempo beim Abschuss wird hierauf begrenzt. So ist die Flugbahn unabhängig vom
+   * Anlauf vorhersehbar – Levels können das Ziel eines Pads zuverlässig platzieren.
+   */
+  maxHorizontalSpeed: number;
+}
+
 export interface MovementConfig {
   /** Feste Physik-Taktrate. */
   physicsHz: number;
@@ -246,6 +254,7 @@ export interface MovementConfig {
   grapple: GrappleConfig;
   vault: VaultConfig;
   landing: LandingConfig;
+  jumpPad: JumpPadConfig;
 }
 
 export const MOVEMENT: MovementConfig = {
@@ -344,7 +353,7 @@ export const MOVEMENT: MovementConfig = {
     aimConeDeg: 11,
     hookSpeed: 220,
     bufferTime: 0.15,
-    cooldown: 0.35,
+    cooldown: 0.25,
 
     pullAcceleration: 75,
     pullMaxSpeed: 26,
@@ -384,6 +393,10 @@ export const MOVEMENT: MovementConfig = {
     hardImpactSpeed: 13,
     rollImpactSpeed: 20,
     hardSpeedKeep: 1,
+  },
+
+  jumpPad: {
+    maxHorizontalSpeed: 10,
   },
 };
 

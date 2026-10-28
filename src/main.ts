@@ -1,7 +1,7 @@
 import './style.css';
 import { GAME } from './config/game';
 import { Game, type TestControls } from './core/Game';
-import { sandboxLevel } from './level/levels/sandbox';
+import { findLevel, LEVELS } from './level/levels';
 
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>('#game');
@@ -15,7 +15,8 @@ async function boot(): Promise<void> {
 
   const game = new Game(canvas, ui);
   await game.init();
-  game.loadLevel(sandboxLevel);
+  const requested = new URLSearchParams(location.search).get('level');
+  game.loadLevel((requested ? findLevel(requested) : undefined) ?? LEVELS[0]!);
   loading.remove();
   game.start();
 

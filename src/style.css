@@ -267,3 +267,34 @@ body {
     opacity: 0;
   }
 }
+
+.hint-box {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  max-width: min(720px, 90vw);
+  transform: translateX(-50%);
+  padding: 14px 22px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  font-size: 18px;
+  line-height: 1.6;
+  text-align: center;
+  animation: toast-in 0.25s ease-out;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.8em;
+  padding: 0 0.45em;
+  margin: 0 0.1em;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-bottom-width: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  font: 700 0.85em var(--font);
+  line-height: 1.6;
+  text-align: center;
+  color: #fff;
+}

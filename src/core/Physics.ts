@@ -54,12 +54,21 @@ export interface PlatformMotion {
 
 export type SurfaceKind = 'solid' | 'wallrun' | 'moving' | 'jumpPad';
 
+/** Sprungpad-Daten einer Oberfläche. */
+export interface LaunchInfo {
+  /** Abfluggeschwindigkeit nach oben (m/s). */
+  power: number;
+  pushX: number;
+  pushZ: number;
+}
+
 export interface SurfaceInfo {
   kind: SurfaceKind;
   /** Eindeutige ID des Level-Elements, z. B. für „nicht zweimal hintereinander dieselbe Wand“. */
   elementId: number;
   wallRunnable: boolean;
   platform?: PlatformMotion;
+  launch?: LaunchInfo;
 }
 
 export const IDENTITY_QUAT: QuatLike = { x: 0, y: 0, z: 0, w: 1 };

@@ -1,9 +1,21 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../config/render';
+import { createRng } from '../core/math';
 import type { GrapplePoint } from '../mechanics/Grapple';
-import { createWorldBox } from './geometry';
-import type { Checkpoint, CheckpointVisual, GrapplePointVisual, LevelVisualFactory } from './Level';
+import { applyWorldUVs, createWorldBox } from './geometry';
+import {
+  goalQuaternion,
+  type AnimatedVisual,
+  type Checkpoint,
+  type CheckpointVisual,
+  type Goal,
+  type GrapplePointVisual,
+  type JumpPad,
+  type LevelVisualFactory,
+} from './Level';
+import type { MovingPlatform } from './MovingPlatform';
+import type { LevelData } from './types';
 import type { Aabb } from './triggers';
 import { TEXTURE_TILE_SIZE, type MaterialKey, type MaterialLibrary } from './materials';
 import type { ResolvedBox } from './shapes';
@@ -47,6 +59,45 @@ function createBeamTexture(): THREE.CanvasTexture {
   return texture;
 }
 
+/** Schachbrettmuster für die Ziellinie. */
+function createCheckerTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 16;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D-Canvas nicht verfügbar');
+  for (let x = 0; x < 8; x++) {
+    for (let y = 0; y < 2; y++) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? '#ffffff' : '#111111';
+      ctx.fillRect(x * 8, y * 8, 8, 8);
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  return texture;
+}
+
+/** Schriftzug als Textur (für das Zielschild). */
+function createLabelTexture(text: string, color: string): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D-Canvas nicht verfügbar');
+  ctx.font = '900 96px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.strokeText(text, 256, 68);
+  ctx.fillStyle = color;
+  ctx.fillText(text, 256, 68);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 /**
  * Baut die Meshes eines Levels aus den aufgelösten Level-Daten.
  * Statische Geometrie wird pro Material zu einem Mesh zusammengefasst (ein Draw Call pro Material).
@@ -56,6 +107,7 @@ export class MeshFactory implements LevelVisualFactory {
   private beamTexture: THREE.CanvasTexture | null = null;
   private readonly sharedGeometries: THREE.BufferGeometry[] = [];
   private readonly sharedMaterials: THREE.Material[] = [];
+  private readonly textures: THREE.Texture[] = [];
 
   constructor(private readonly materials: MaterialLibrary) {}
 
@@ -144,9 +196,11 @@ export class MeshFactory implements LevelVisualFactory {
         core.rotation.y = t * (highlighted ? 3 : 1.1);
         core.rotation.x = Math.sin(t * 0.7) * 0.4;
         if (ring) {
+          // Ring bleibt der Anlaufrichtung (+Z) zugewandt und pendelt nur leicht – so ist er
+          // aus der Ferne immer als Ring erkennbar.
           ring.scale.setScalar(scale);
-          ring.rotation.y = t * 0.8;
-          ring.rotation.x = Math.PI / 2 + Math.sin(t * 0.9) * 0.35;
+          ring.rotation.y = Math.sin(t * 0.8) * 0.35;
+          ring.rotation.x = Math.sin(t * 0.6) * 0.15;
         }
         glow.scale.setScalar((highlighted ? 3.4 : 2.6) * (1 + Math.sin(t * 3) * 0.05));
       },
@@ -215,6 +269,161 @@ export class MeshFactory implements LevelVisualFactory {
     return mesh;
   }
 
+  movingPlatform(platform: MovingPlatform): THREE.Object3D {
+    const geometry = this.shared(
+      new THREE.BoxGeometry(platform.size.x, platform.size.y, platform.size.z),
+    );
+    applyWorldUVs(geometry, TEXTURE_TILE_SIZE);
+    const mesh = new THREE.Mesh(geometry, this.materials.get('moving'));
+    mesh.position.copy(platform.position);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  jumpPad(pad: JumpPad): AnimatedVisual {
+    const group = new THREE.Group();
+    group.position.copy(pad.position);
+    const radius = Math.min(pad.size[0], pad.size[1]) * 0.45;
+    const rings: { mesh: THREE.Mesh; material: THREE.MeshBasicMaterial; phase: number }[] = [];
+    const geometry = this.shared(new THREE.RingGeometry(radius * 0.82, radius, 40));
+    for (let i = 0; i < 3; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: PALETTE.jumpPad,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      this.sharedMaterials.push(material);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.rotation.x = -Math.PI / 2;
+      group.add(mesh);
+      rings.push({ mesh, material, phase: i / 3 });
+    }
+    return {
+      object: group,
+      update(time: number) {
+        for (const ring of rings) {
+          // Ringe steigen auf, werden kleiner und blenden aus – zeigt die Sprungrichtung.
+          const t = (time * 0.9 + ring.phase) % 1;
+          ring.mesh.position.y = 0.05 + t * 2.2;
+          ring.mesh.scale.setScalar(1 - t * 0.35);
+          ring.material.opacity = (1 - t) * 0.8;
+        }
+      },
+    };
+  }
+
+  goal(goal: Goal): AnimatedVisual {
+    const { min, max } = goal.box;
+    const width = Math.max(max.x - min.x, max.z - min.z);
+    const height = max.y - min.y + 1;
+    const group = new THREE.Group();
+    group.position.copy(goal.position);
+    group.quaternion.copy(goalQuaternion(goal));
+    const gold = this.materials.get('goal');
+    const pillarGeometry = this.shared(new THREE.BoxGeometry(0.5, height, 0.5));
+    for (const side of [-1, 1]) {
+      const pillar = new THREE.Mesh(pillarGeometry, gold);
+      pillar.position.set((side * width) / 2, height / 2, 0);
+      pillar.castShadow = true;
+      group.add(pillar);
+    }
+    const top = new THREE.Mesh(this.shared(new THREE.BoxGeometry(width + 0.5, 0.5, 0.5)), gold);
+    top.position.y = height;
+    top.castShadow = true;
+    group.add(top);
+
+    const checker = createCheckerTexture();
+    this.textures.push(checker);
+    const lineMaterial = new THREE.MeshBasicMaterial({ map: checker });
+    this.sharedMaterials.push(lineMaterial);
+    const line = new THREE.Mesh(this.shared(new THREE.PlaneGeometry(width, 0.8)), lineMaterial);
+    line.rotation.x = -Math.PI / 2;
+    line.position.y = 0.02;
+    group.add(line);
+
+    const curtainMaterial = new THREE.MeshBasicMaterial({
+      map: this.beam(),
+      color: PALETTE.goal,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.sharedMaterials.push(curtainMaterial);
+    const curtain = new THREE.Mesh(
+      this.shared(new THREE.PlaneGeometry(width, height)),
+      curtainMaterial,
+    );
+    curtain.position.y = height / 2;
+    group.add(curtain);
+
+    const label = createLabelTexture('ZIEL', PALETTE.goal);
+    this.textures.push(label);
+    const signMaterial = new THREE.SpriteMaterial({
+      map: label,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.sharedMaterials.push(signMaterial);
+    const sign = new THREE.Sprite(signMaterial);
+    sign.scale.set(4, 1, 1);
+    sign.position.y = height + 1.4;
+    group.add(sign);
+
+    return {
+      object: group,
+      update(time: number) {
+        curtainMaterial.opacity = 0.28 + Math.sin(time * 3) * 0.1;
+        sign.position.y = height + 1.4 + Math.sin(time * 2) * 0.15;
+      },
+    };
+  }
+
+  backdrop(level: LevelData, bounds: THREE.Box3): THREE.Object3D | null {
+    const settings = level.backdrop;
+    if (!settings || settings.count <= 0 || bounds.isEmpty()) return null;
+    const rng = createRng(settings.seed);
+    const center = bounds.getCenter(new THREE.Vector3());
+    const size = bounds.getSize(new THREE.Vector3());
+    const inner = Math.hypot(size.x, size.z) / 2 + 45;
+    const geometry = this.shared(new THREE.BoxGeometry(1, 1, 1));
+    const material = new THREE.MeshStandardMaterial({
+      color: settings.color ?? PALETTE.backdrop,
+      roughness: 1,
+      metalness: 0,
+    });
+    this.sharedMaterials.push(material);
+    const mesh = new THREE.InstancedMesh(geometry, material, settings.count);
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    const rotation = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const bottom = level.killY - 60;
+    for (let i = 0; i < settings.count; i++) {
+      const angle = rng() * Math.PI * 2;
+      const distance = inner + rng() * 220;
+      const width = 8 + rng() * 22;
+      const top = center.y - 10 + rng() * rng() * 120;
+      scale.set(width, top - bottom, width * (0.6 + rng() * 0.8));
+      position.set(
+        center.x + Math.cos(angle) * distance,
+        (top + bottom) / 2,
+        center.z + Math.sin(angle) * distance,
+      );
+      rotation.setFromAxisAngle(up, rng() * Math.PI);
+      matrix.compose(position, rotation, scale);
+      mesh.setMatrixAt(i, matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+    return mesh;
+  }
+
   update(time: number): void {
     // Alle Kill-Zonen teilen sich ein Material – ein Puls für alle.
     this.materials.get('killZone').emissiveIntensity = 0.75 + Math.sin(time * 4) * 0.25;
@@ -223,6 +432,8 @@ export class MeshFactory implements LevelVisualFactory {
   dispose(): void {
     for (const g of this.sharedGeometries) g.dispose();
     for (const m of this.sharedMaterials) m.dispose();
+    for (const t of this.textures) t.dispose();
+    this.textures.length = 0;
     this.glowTexture?.dispose();
     this.beamTexture?.dispose();
     this.sharedGeometries.length = 0;

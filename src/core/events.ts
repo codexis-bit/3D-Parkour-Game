@@ -20,6 +20,7 @@ export type GameEvents = {
   grappleCancel: Record<string, never>;
   vault: { height: number };
   checkpoint: { index: number; total: number };
+  jumpPad: { power: number };
   death: { reason: 'fall' | 'killZone' };
   respawn: { checkpoint: number };
 };

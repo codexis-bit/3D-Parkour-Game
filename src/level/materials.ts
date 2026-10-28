@@ -172,8 +172,8 @@ export class MaterialLibrary {
           map: this.track(createStripeTexture(PALETTE.wallRun, '#63c6ff', 6, a)),
           emissive: new THREE.Color(PALETTE.wallRun),
           emissiveIntensity: 0.28,
-          roughness: 0.55,
-          metalness: 0.05,
+          roughness: 0.8,
+          metalness: 0,
         });
       case 'slide':
         return new THREE.MeshStandardMaterial({

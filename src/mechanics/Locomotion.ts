@@ -111,9 +111,11 @@ export function applyGroundMovement(
 }
 
 /**
- * Luftkontrolle (Quake-Prinzip): Eingabe beschleunigt nur, solange die Geschwindigkeit in
- * Eingaberichtung unter `inputSpeed` liegt. Zusätzlich darf das Gesamttempo durch Lenken nicht über
- * max(vorher, inputSpeed) steigen – Lenken ja, „Air-Strafe“-Tempogewinn nein.
+ * Luftkontrolle: Die Geschwindigkeit wird mit begrenzter Beschleunigung zu einem Zielvektor in
+ * Eingaberichtung gezogen, dessen Länge dem aktuellen Tempo entspricht (mindestens `inputSpeed`).
+ * Dadurch lässt sich auch bei hohem Tempo lenken, ohne Schwung zu verlieren – das Gesamttempo kann
+ * durch Lenken aber nie über max(vorher, inputSpeed) steigen (kein „Air-Strafe“-Tempogewinn).
+ * Gegenlenken bremst, eine Kehrtwende erreicht höchstens `inputSpeed`.
  */
 export function applyAirMovement(
   v: THREE.Vector3,
@@ -127,12 +129,8 @@ export function applyAirMovement(
   const wx = wish.x / wishLen;
   const wz = wish.z / wishLen;
   const before = horizontalSpeed(v);
-  const along = v.x * wx + v.z * wz;
-  const add = cfg.inputSpeed * Math.min(1, wishLen) - along;
-  if (add <= 0) return;
-  const accel = Math.min(cfg.acceleration * dt, add);
-  v.x += wx * accel;
-  v.z += wz * accel;
+  const targetSpeed = Math.max(before, cfg.inputSpeed * Math.min(1, wishLen));
+  moveTowardsHorizontal(v, wx * targetSpeed, wz * targetSpeed, cfg.acceleration * dt);
   const limit = Math.max(before, cfg.inputSpeed);
   const after = horizontalSpeed(v);
   if (after > limit) scaleHorizontal(v, limit / after);

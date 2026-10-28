@@ -151,7 +151,10 @@ export class PlayerController implements PlayerContext {
     this.correction.set(0, 0, 0);
     this.carryWithPlatform();
     if (input.jumpPressed) this.jumpBufferTimer = this.cfg.jump.bufferTime;
-    if (input.grapplePressed) this.grappleBufferTimer = this.cfg.grapple.bufferTime;
+    // Ein Druck während der Abklingzeit wird bis zu deren Ende (plus Puffer) gemerkt.
+    if (input.grapplePressed) {
+      this.grappleBufferTimer = this.cfg.grapple.bufferTime + this.grapple.cooldown;
+    }
     this.slide.tick(dt);
     this.wallRun.tick(dt);
     this.grapple.tick(dt);
@@ -213,6 +216,7 @@ export class PlayerController implements PlayerContext {
   // ---------------------------------------------------------------- States
 
   private updateGrounded(dt: number): void {
+    if (this.tryLaunchPad()) return;
     if (this.jumpBufferTimer > 0 && this.tryJump('ground')) return;
     // Slide-Taste: mit genug Tempo sliden, sonst ducken.
     if (this.input.slidePressed && this.slide.canStart(this.horizontalSpeed)) {
@@ -230,6 +234,7 @@ export class PlayerController implements PlayerContext {
   }
 
   private updateSliding(dt: number): void {
+    if (this.tryLaunchPad()) return;
     if (this.jumpBufferTimer > 0 && this.tryJump('slide')) return;
     const normal = this.ground.hit && this.ground.distance < 0.3 ? this.ground.normal : UP;
     this.slide.update(this.velocity, normal, this.wish, dt);
@@ -327,6 +332,28 @@ export class PlayerController implements PlayerContext {
   }
 
   // ---------------------------------------------------------------- Aktionen
+
+  /** Steht der Spieler auf einem Sprungpad, wird er nach oben katapultiert. */
+  private tryLaunchPad(): boolean {
+    const launch = this.grounded ? this.ground.surface?.launch : undefined;
+    if (!launch || this.ground.distance > 0.2) return false;
+    if (this.body.isCrouched) this.body.setCrouched(false);
+    this.velocity.y = launch.power;
+    this.velocity.x += launch.pushX;
+    this.velocity.z += launch.pushZ;
+    const speed = this.horizontalSpeed;
+    const max = this.cfg.jumpPad.maxHorizontalSpeed;
+    if (speed > max) {
+      this.velocity.x *= max / speed;
+      this.velocity.z *= max / speed;
+    }
+    this.consumeJump();
+    this.jumpCutArmed = false;
+    this.grounded = false;
+    this.fsm.transition(MoveState.Airborne);
+    this.events.emit('jumpPad', { power: launch.power });
+    return true;
+  }
 
   /** Kante in Brusthöhe vor dem Spieler? Dann automatisch hochziehen. */
   private tryVault(): boolean {

@@ -62,15 +62,33 @@ describe('Level – Checkpoints und Kill-Zonen', () => {
     const level = new Level(data, 60);
     expect(level.respawnPoint.feet.z).toBe(0);
 
-    level.checkTriggers(new THREE.Vector3(0, 0, -10), 0.35, 1.8, events);
+    level.checkTriggers(
+      new THREE.Vector3(0, 0, -10),
+      new THREE.Vector3(0, 0, -10),
+      0.35,
+      1.8,
+      events,
+    );
     expect(events).toEqual([{ type: 'checkpoint', index: 0 }]);
     expect(level.respawnPoint.feet.z).toBe(-10);
     expect(level.respawnPoint.yaw).toBeCloseTo(Math.PI / 2);
 
-    level.checkTriggers(new THREE.Vector3(0, 0, -20), 0.35, 1.8, events);
+    level.checkTriggers(
+      new THREE.Vector3(0, 0, -20),
+      new THREE.Vector3(0, 0, -20),
+      0.35,
+      1.8,
+      events,
+    );
     expect(level.checkpointIndex).toBe(1);
     // Zurücklaufen zum ersten Checkpoint ändert nichts mehr.
-    level.checkTriggers(new THREE.Vector3(0, 0, -10), 0.35, 1.8, events);
+    level.checkTriggers(
+      new THREE.Vector3(0, 0, -10),
+      new THREE.Vector3(0, 0, -10),
+      0.35,
+      1.8,
+      events,
+    );
     expect(events).toHaveLength(0);
     expect(level.checkpointIndex).toBe(1);
 
@@ -82,11 +100,29 @@ describe('Level – Checkpoints und Kill-Zonen', () => {
   it('meldet Tod in Kill-Zonen und unterhalb von killY', async () => {
     await initPhysics();
     const level = new Level(data, 60);
-    level.checkTriggers(new THREE.Vector3(0, 0, -30), 0.35, 1.8, events);
+    level.checkTriggers(
+      new THREE.Vector3(0, 0, -30),
+      new THREE.Vector3(0, 0, -30),
+      0.35,
+      1.8,
+      events,
+    );
     expect(events).toEqual([{ type: 'death', reason: 'killZone' }]);
-    level.checkTriggers(new THREE.Vector3(0, -11, -40), 0.35, 1.8, events);
+    level.checkTriggers(
+      new THREE.Vector3(0, -11, -40),
+      new THREE.Vector3(0, -11, -40),
+      0.35,
+      1.8,
+      events,
+    );
     expect(events).toEqual([{ type: 'death', reason: 'fall' }]);
-    level.checkTriggers(new THREE.Vector3(0, 0, -40), 0.35, 1.8, events);
+    level.checkTriggers(
+      new THREE.Vector3(0, 0, -40),
+      new THREE.Vector3(0, 0, -40),
+      0.35,
+      1.8,
+      events,
+    );
     expect(events).toHaveLength(0);
     level.dispose();
   });

@@ -25,6 +25,7 @@ export class HUD {
   private readonly markerLabel: HTMLSpanElement;
   private readonly toastBox: HTMLDivElement;
   private readonly flashBox: HTMLDivElement;
+  private readonly hintBox: HTMLDivElement;
   private readonly projected = new THREE.Vector3();
   private toastTimer = 0;
 
@@ -35,6 +36,7 @@ export class HUD {
       <div class="crosshair"><span></span></div>
       <div class="grapple-marker" hidden><span class="grapple-marker__label"></span></div>
       <div class="toast" hidden></div>
+      <div class="hint-box" hidden></div>
       <div class="flash"></div>`;
     parent.append(this.root);
     this.crosshair = this.root.querySelector('.crosshair') as HTMLDivElement;
@@ -42,6 +44,17 @@ export class HUD {
     this.markerLabel = this.root.querySelector('.grapple-marker__label') as HTMLSpanElement;
     this.toastBox = this.root.querySelector('.toast') as HTMLDivElement;
     this.flashBox = this.root.querySelector('.flash') as HTMLDivElement;
+    this.hintBox = this.root.querySelector('.hint-box') as HTMLDivElement;
+  }
+
+  /** Tutorial-Hinweis unten in der Bildmitte; Text in [eckigen Klammern] wird als Taste dargestellt. */
+  setHint(text: string | null): void {
+    if (!text) {
+      this.hintBox.hidden = true;
+      return;
+    }
+    this.hintBox.replaceChildren(...renderKeyText(text));
+    this.hintBox.hidden = false;
   }
 
   /** Kurze Meldung oben in der Bildmitte (z. B. „Checkpoint 2/4“). */
@@ -91,4 +104,21 @@ export class HUD {
     this.marker.classList.toggle('grapple-marker--cooling', indicator.cooling);
     this.markerLabel.textContent = indicator.mode ? MODE_LABEL[indicator.mode] : '';
   }
+}
+
+/** Zerlegt „Drücke [Leertaste]“ in Text- und <kbd>-Knoten (ohne innerHTML, also XSS-sicher). */
+export function renderKeyText(text: string): Node[] {
+  const nodes: Node[] = [];
+  const pattern = /\[([^\]]+)\]/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > last) nodes.push(document.createTextNode(text.slice(last, index)));
+    const kbd = document.createElement('kbd');
+    kbd.textContent = match[1] ?? '';
+    nodes.push(kbd);
+    last = index + match[0].length;
+  }
+  if (last < text.length) nodes.push(document.createTextNode(text.slice(last)));
+  return nodes;
 }
