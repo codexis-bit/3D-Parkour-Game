@@ -44,8 +44,8 @@ const MAX_MOUSE_DELTA = 600;
 export class Input {
   /** Nur wenn aktiv, werden Spieltasten abgefangen und ausgewertet (nicht in Menüs). */
   enabled = false;
-  /** Externe Achsen (z. B. Gamepad), werden zu den Tasten addiert. */
-  readonly external = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
+  /** Externe Bewegungsachsen (Gamepad), werden zu den Tasten addiert. */
+  readonly external = { moveX: 0, moveY: 0 };
   /** Externe Halte-Zustände (Gamepad-Tasten). */
   readonly externalHeld = new Set<Action>();
 

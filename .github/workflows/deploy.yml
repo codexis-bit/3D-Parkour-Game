@@ -14,9 +14,10 @@ permissions:
   pages: write
   id-token: write
 
+# Pull Requests: ältere Läufe abbrechen. main: laufende Deployments immer zu Ende bringen.
 concurrency:
   group: pages-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
