@@ -28,7 +28,10 @@ export class AttractCamera {
   update(dt: number, camera: THREE.PerspectiveCamera): void {
     const curve = this.curve;
     if (!curve) return;
-    this.distance = (this.distance + dt * this.speed) % this.length;
+    // Auch bei negativem dt im Bereich [0, length) bleiben: Kurven-Parameter außerhalb von
+    // [0, 1] liefern in three.js NaN und lassen getPointAt abstürzen.
+    const next = (this.distance + Math.max(0, dt) * this.speed) % this.length;
+    this.distance = Number.isFinite(next) ? next : 0;
     const u = this.distance / this.length;
     curve.getPointAt(u, this.position);
     curve.getPointAt(Math.min(1, u + 18 / this.length), this.look);

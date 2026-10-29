@@ -434,7 +434,8 @@ export class Game {
   // ---------------------------------------------------------------- Loop
 
   private readonly frame = (now: number): void => {
-    const dt = Math.min((now - this.lastTime) / 1000, 0.25);
+    // Der rAF-Zeitstempel kann vor dem performance.now() aus start() liegen – nie rückwärts laufen.
+    const dt = Math.min(Math.max((now - this.lastTime) / 1000, 0), 0.25);
     this.lastTime = now;
     this.elapsed += dt;
 
