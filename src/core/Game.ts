@@ -96,11 +96,13 @@ export class Game {
   private player: PlayerController | null = null;
   private mode: Mode = 'menu';
   private testMode = false;
+  /** Spielen ohne Pointer Lock: Umsehen per Ziehen, Pause per Taste statt Lock-Verlust. */
+  private freeLook = false;
   private lastTime = 0;
   private elapsed = 0;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    private readonly canvas: HTMLCanvasElement,
     private readonly ui: HTMLElement,
   ) {
     this.graphics = new Graphics(canvas);
@@ -127,11 +129,17 @@ export class Game {
       physicsHz: MOVEMENT.physicsHz,
       renderer: this.graphics.renderer,
       runTime: 0,
+      yaw: 0,
+      pitch: 0,
     };
     this.menus = new Menus(this.ui, this.settings, this.bestTimes, {
       play: () => this.play(),
       playLevel: (id) => this.playLevel(id),
       resume: () => this.resume(),
+      playWithoutLock: () => {
+        this.enableFreeLook();
+        this.resume();
+      },
       restart: () => this.restartRun(),
       nextLevel: () => this.playNext(),
       quitToMenu: () => this.showMainMenu(),
@@ -148,7 +156,12 @@ export class Game {
     this.ui.addEventListener('click', (event) => {
       if (event.target instanceof Element && event.target.closest('.btn')) this.audio.uiClick();
     });
-    document.addEventListener('visibilitychange', () => this.audio.setSuspended(document.hidden));
+    document.addEventListener('visibilitychange', () => {
+      this.audio.setSuspended(document.hidden);
+      if (document.hidden) this.pauseIfUnlocked();
+    });
+    // Ohne Pointer Lock pausiert nichts automatisch, wenn das Fenster den Fokus verliert.
+    window.addEventListener('blur', () => this.pauseIfUnlocked());
   }
 
   async init(): Promise<void> {
@@ -351,7 +364,12 @@ export class Game {
   }
 
   private requestLock(): void {
-    if (this.testMode) {
+    if (this.testMode || this.freeLook) {
+      this.setInputActive(true);
+      return;
+    }
+    if (!this.pointerLock.supported) {
+      this.enableFreeLook();
       this.setInputActive(true);
       return;
     }
@@ -365,8 +383,28 @@ export class Game {
     });
   }
 
+  /** Schaltet auf Umsehen per Ziehen um (bleibt bis zum Neuladen der Seite aktiv). */
+  private enableFreeLook(): void {
+    if (this.freeLook) return;
+    this.freeLook = true;
+    this.input.dragLook = true;
+    this.canvas.classList.add('is-free-look');
+    this.hud.toast('Umsehen: Maus mit gedrückter linker Taste ziehen', 'info', 4);
+  }
+
+  /** Pause ohne Pointer Lock (Test-Modus und Umsehen per Ziehen). */
+  private pauseUnlocked(): void {
+    this.mode = 'paused';
+    this.setInputActive(false);
+    this.menus.show('pause', true);
+  }
+
+  private pauseIfUnlocked(): void {
+    if (this.freeLook && this.mode === 'playing') this.pauseUnlocked();
+  }
+
   private readonly handlePointerLock = (locked: boolean): void => {
-    if (this.testMode) return;
+    if (this.testMode || this.freeLook) return;
     if (locked) {
       if (this.mode === 'playing' || this.mode === 'paused') {
         this.mode = 'playing';
@@ -399,13 +437,8 @@ export class Game {
       this.respawn();
     } else if (action === 'pause') {
       // Esc gibt der Browser selbst frei; P pausiert über das Freigeben des Pointer Locks.
-      if (this.testMode) {
-        this.mode = 'paused';
-        this.setInputActive(false);
-        this.menus.show('pause', true);
-      } else {
-        this.pointerLock.exit();
-      }
+      if (this.testMode || this.freeLook) this.pauseUnlocked();
+      else this.pointerLock.exit();
     }
   };
 
@@ -486,6 +519,8 @@ export class Game {
     debugFrame.dt = dt;
     debugFrame.steps = steps;
     debugFrame.runTime = this.timer.time;
+    debugFrame.yaw = this.cameraRig.yaw;
+    debugFrame.pitch = this.cameraRig.pitch;
     this.debug.update(this.mode === 'menu' ? null : player, debugFrame);
 
     this.graphics.render();

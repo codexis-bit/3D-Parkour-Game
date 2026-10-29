@@ -13,6 +13,8 @@ export interface MenuActions {
   play(): void;
   playLevel(id: string): void;
   resume(): void;
+  /** Ohne Pointer Lock weiterspielen (Umsehen per Ziehen). */
+  playWithoutLock(): void;
   restart(): void;
   nextLevel(): void;
   quitToMenu(): void;
@@ -27,6 +29,16 @@ export interface FinishInfo {
 }
 
 const DIFFICULTY_LABEL = ['', 'Leicht', 'Mittel', 'Schwer'] as const;
+
+/** Nur Touch, keine Maus (Handy, Tablet) – dort fehlen die nötigen Eingabegeräte. */
+function isTouchOnly(): boolean {
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
+function setButtonLabel(node: HTMLButtonElement, label: string): void {
+  const span = node.querySelector('span');
+  if (span) span.textContent = label;
+}
 
 /** Tabelle für den Steuerungs-Bildschirm. */
 const CONTROLS: readonly [string, string, string][] = [
@@ -159,13 +171,26 @@ export class Menus {
       case 'click':
         return el(
           'div',
-          { className: 'screen screen--click', onClick: () => this.actions.resume() },
+          {
+            className: 'screen screen--click',
+            // Klick irgendwo fordert den Pointer Lock erneut an – außer auf dem Ausweich-Button.
+            onClick: (event) => {
+              if (!(event.target instanceof Element && event.target.closest('.btn'))) {
+                this.actions.resume();
+              }
+            },
+          },
           [
             el('div', { className: 'click-card' }, [
               el('div', { className: 'click-card__title', text: 'Klicken zum Spielen' }),
               el('div', {
                 className: 'click-card__hint',
                 text: 'Die Maus wird für die Kamera gesperrt – Esc gibt sie wieder frei.',
+              }),
+              button('Ohne Maussperre spielen', () => this.actions.playWithoutLock()),
+              el('div', {
+                className: 'click-card__hint',
+                text: 'Falls die Sperre nicht klappt: Umsehen dann mit gedrückter linker Maustaste.',
               }),
             ]),
           ],
@@ -203,6 +228,12 @@ export class Menus {
         button('Steuerung', () => this.show('controls')),
       ]),
       el('p', { className: 'main-tip' }, [el('strong', { text: 'Tipp: ' }), tip]),
+      isTouchOnly()
+        ? el('p', {
+            className: 'main-note',
+            text: 'MOMENTUM braucht Tastatur und Maus oder ein Gamepad.',
+          })
+        : null,
       el('p', { className: 'main-version', text: `v${GAME.version}` }),
     ]);
   }
@@ -316,11 +347,23 @@ export class Menus {
         (v) => update({ gamepadSensitivity: v }),
       ),
     ]);
+    // Bestätigung direkt am Button statt confirm(): Dialoge sind in eingebetteten Rahmen oft blockiert.
+    let confirmTimer = 0;
     const resetTimes = button('Bestzeiten löschen', () => {
-      if (window.confirm('Alle Bestzeiten wirklich löschen?')) {
+      window.clearTimeout(confirmTimer);
+      if (resetTimes.dataset.confirm === 'pending') {
         this.bestTimes.clear();
-        this.render();
+        delete resetTimes.dataset.confirm;
+        setButtonLabel(resetTimes, 'Bestzeiten gelöscht');
+        resetTimes.disabled = true;
+        return;
       }
+      resetTimes.dataset.confirm = 'pending';
+      setButtonLabel(resetTimes, 'Wirklich löschen?');
+      confirmTimer = window.setTimeout(() => {
+        delete resetTimes.dataset.confirm;
+        setButtonLabel(resetTimes, 'Bestzeiten löschen');
+      }, 4000);
     });
     const resetSettings = button('Standardwerte', () => {
       this.settings.reset();
@@ -359,6 +402,9 @@ export class Menus {
       el('li', { text: 'Orange Kristalle ziehen dich heran, Ringe sind Schwungpunkte.' }),
       el('li', {
         text: 'Strg+W schließt in vielen Browsern den Tab – nutze zum Sliden lieber Shift oder C.',
+      }),
+      el('li', {
+        text: 'Ohne Maussperre schaust du dich mit gedrückter linker Maustaste um.',
       }),
     ]);
     return this.panel(

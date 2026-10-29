@@ -64,6 +64,10 @@ dynamisches FOV lassen sich im Optionsmenü einzeln abschalten.
 Strg+W schließt in vielen Browsern den Tab, deshalb fragt das Spiel beim Schließen während eines
 Laufs nach. Zum Sliden sind Shift oder C die sicherere Wahl.
 
+Für die Kamera sperrt das Spiel den Mauszeiger (Pointer Lock). Verweigert der Browser oder ein
+eingebetteter Rahmen die Sperre, erscheint die Schaltfläche „Ohne Maussperre spielen“. Dann
+schaust du dich mit gedrückter linker Maustaste um, und Esc oder P pausieren.
+
 Im Optionsmenü lassen sich Maus- und Gamepad-Empfindlichkeit, Y-Achse, Sichtfeld (70° bis 120°,
 Standard 95°), Lautstärke, die Kamera-Effekte, die Tempo-Einheit und die Grafikqualität
 einstellen.

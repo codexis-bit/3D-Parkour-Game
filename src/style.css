@@ -50,6 +50,15 @@ body {
   outline: none;
 }
 
+/* Ohne Pointer Lock: Umsehen per Ziehen */
+#game.is-free-look {
+  cursor: grab;
+}
+
+#game.is-free-look:active {
+  cursor: grabbing;
+}
+
 #ui {
   position: absolute;
   inset: 0;
@@ -180,6 +189,13 @@ body {
   color: var(--accent-strong);
 }
 
+.main-note {
+  max-width: 440px;
+  margin: 0;
+  color: var(--gold);
+  font-size: 14px;
+}
+
 .main-version {
   position: absolute;
   right: 20px;
@@ -269,6 +285,11 @@ body {
 .btn--primary:focus-visible {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
+}
+
+.btn[data-confirm='pending'] {
+  border-color: var(--bad);
+  color: var(--bad);
 }
 
 .btn:disabled {
@@ -603,11 +624,19 @@ kbd {
 }
 
 .click-card {
+  display: grid;
+  justify-items: center;
+  max-width: 460px;
   padding: 26px 34px;
   border-radius: var(--radius);
   background: var(--panel-strong);
   border: 1px solid var(--panel-border);
   text-align: center;
+}
+
+.click-card .btn {
+  margin-top: 20px;
+  font-size: 14px;
 }
 
 .click-card__title {

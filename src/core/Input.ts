@@ -44,6 +44,11 @@ const MAX_MOUSE_DELTA = 600;
 export class Input {
   /** Nur wenn aktiv, werden Spieltasten abgefangen und ausgewertet (nicht in Menüs). */
   enabled = false;
+  /**
+   * Umsehen per Ziehen mit gedrückter linker Maustaste – für Umgebungen ohne Pointer Lock
+   * (z. B. eingebettete Rahmen, die ihn verweigern).
+   */
+  dragLook = false;
   /** Externe Bewegungsachsen (Gamepad), werden zu den Tasten addiert. */
   readonly external = { moveX: 0, moveY: 0 };
   /** Externe Halte-Zustände (Gamepad-Tasten). */
@@ -176,7 +181,10 @@ export class Input {
   };
 
   private readonly handleMouseMove = (event: MouseEvent): void => {
-    if (!this.enabled || document.pointerLockElement !== this.lockElement) return;
+    if (!this.enabled) return;
+    const locked = document.pointerLockElement === this.lockElement;
+    const dragging = this.dragLook && (event.buttons & 1) !== 0;
+    if (!locked && !dragging) return;
     if (
       Math.abs(event.movementX) > MAX_MOUSE_DELTA ||
       Math.abs(event.movementY) > MAX_MOUSE_DELTA

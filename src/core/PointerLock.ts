@@ -15,6 +15,11 @@ export class PointerLock {
     return document.pointerLockElement === this.element;
   }
 
+  /** Kennt der Browser die Pointer Lock API überhaupt? (Fehlt z. B. auf Tablets.) */
+  get supported(): boolean {
+    return typeof this.element.requestPointerLock === 'function';
+  }
+
   onChange(listener: (locked: boolean) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

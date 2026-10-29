@@ -1,5 +1,6 @@
 import type { World } from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
+import { RAD2DEG } from '../core/math';
 import type { Level } from '../level/Level';
 import type { Aabb } from '../level/triggers';
 import { MOVE_STATE_LABELS } from '../player/MoveState';
@@ -14,6 +15,9 @@ export interface DebugFrameInfo {
   physicsHz: number;
   renderer: THREE.WebGLRenderer;
   runTime: number;
+  /** Blickrichtung (rad) – in Grad angezeigt, so wie Levels `yaw` angeben. */
+  yaw: number;
+  pitch: number;
 }
 
 const TRIGGER_COLORS = {
@@ -280,6 +284,7 @@ export class DebugOverlay {
         `Zustand   ${MOVE_STATE_LABELS[player.state]}  ·  ${player.timeInState.toFixed(2)} s`,
         `Tempo     ${player.horizontalSpeed.toFixed(2)} m/s  ·  vy ${v.y.toFixed(2)}`,
         `Position  ${p.x.toFixed(2)}  ${p.y.toFixed(2)}  ${p.z.toFixed(2)}`,
+        `Blick     yaw ${(info.yaw * RAD2DEG).toFixed(1)}°  ·  pitch ${(info.pitch * RAD2DEG).toFixed(1)}°`,
         `Boden     ${g.hit ? `ja · Abstand ${g.distance.toFixed(3)} · n.y ${g.normal.y.toFixed(2)}` : 'nein'}`,
         `Coyote    ${t.coyote.toFixed(3)} s  ·  Sprungpuffer ${t.jumpBuffer.toFixed(3)} s`,
         `Wand      Wall-Jump-Gnade ${t.wallJumpGrace.toFixed(2)} s`,
