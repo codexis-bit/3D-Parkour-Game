@@ -35,14 +35,24 @@ declare global {
   }
 }
 
+/** Ratschlag passend zur Fehlerursache (blockiertes WebAssembly sieht sonst wie ein WebGL-Problem aus). */
+function startupAdvice(message: string): string {
+  if (/WebAssembly|wasm/i.test(message)) {
+    return 'Die Physik-Engine (WebAssembly) darf in dieser Umgebung nicht starten. Öffne MOMENTUM in einem normalen Browser-Tab, lokal mit npm run dev oder über GitHub Pages.';
+  }
+  return 'Bitte verwende einen aktuellen Browser mit WebGL2-Unterstützung.';
+}
+
 boot().catch((error: unknown) => {
   console.error(error);
   const ui = document.querySelector('#ui');
   if (ui) {
     const message = error instanceof Error ? error.message : String(error);
-    ui.innerHTML = `<div class="fatal-error"><div><h2>Start fehlgeschlagen</h2><p></p>
-      <p>Bitte verwende einen aktuellen Browser mit WebGL2-Unterstützung.</p></div></div>`;
-    const p = ui.querySelector('.fatal-error p');
-    if (p) p.textContent = message;
+    ui.innerHTML = `<div class="fatal-error"><div><h2>Start fehlgeschlagen</h2>
+      <p class="fatal-error__advice"></p><p class="fatal-error__detail"></p></div></div>`;
+    const advice = ui.querySelector('.fatal-error__advice');
+    const detail = ui.querySelector('.fatal-error__detail');
+    if (advice) advice.textContent = startupAdvice(message);
+    if (detail) detail.textContent = message;
   }
 });

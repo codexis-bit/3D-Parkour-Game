@@ -99,6 +99,23 @@ body {
   color: var(--text);
 }
 
+.fatal-error > div {
+  max-width: 560px;
+}
+
+.fatal-error__advice {
+  color: var(--text);
+  letter-spacing: 0;
+  line-height: 1.6;
+}
+
+.fatal-error__detail {
+  font: 12px/1.5 var(--mono);
+  letter-spacing: 0;
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+
 /* ------------------------------------------------------------------ Bildschirme */
 
 .menus {
